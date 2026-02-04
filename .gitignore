@@ -1,0 +1,54 @@
+notepad .gitignore
+```
+
+Asegúrate que incluya:
+```
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# APKs
+*.apk
+*.aab
+
+# Build outputs
+build/
+android/app/build/
+ios/Flutter/App.framework
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/flutter_export_environment.sh
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+
+# Android
+*.jks
+local.properties
+android/.gradle/
+
+# iOS
+*.mobileprovision
+*.p12
+ios/Runner/GoogleService-Info.plist
