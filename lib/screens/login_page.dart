@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:local_auth/local_auth.dart';
+import 'package:local_auth/local_auth.dart'; // Solo una vez
+import 'package:flutter/services.dart'; // Para manejar errores de plataforma
 import 'dashboard_page.dart';
 import 'register_page.dart';
 
@@ -16,6 +17,7 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   bool _isLoading = false;
 
+  // Instancia correcta para la versión 3.0.0
   final LocalAuthentication auth = LocalAuthentication();
 
   Future<void> _login() async {
@@ -33,35 +35,38 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // --- BIOMETRÍA UNIVERSAL (SIN CONFIGURACIONES QUE DEN ERROR) ---
   Future<void> _authenticateBiometric() async {
     try {
-      // 1. Verificamos si hay sensor (Compatible con todas las versiones)
-      final bool canCheck = await auth.canCheckBiometrics;
-      if (!canCheck) {
-        _showError("Tu celular no tiene biometría activa.");
+      // 1. Verificamos si hay hardware
+      final bool canCheckBiometrics = await auth.canCheckBiometrics;
+      final bool isDeviceSupported = await auth.isDeviceSupported();
+
+      if (!canCheckBiometrics || !isDeviceSupported) {
+        _showError("Tu celular no tiene biometría disponible.");
         return;
       }
 
-      // 2. Autenticación BÁSICA
-      // Al no pasarle "options" ni "stickyAuth", usa la configuración por defecto.
-      // ESTO FUNCIONA EN CUALQUIER VERSIÓN DE LA LIBRERÍA.
+      // 2. Autenticamos (Formato Universal)
+      // Al quitar 'stickyAuth' y 'options', Flutter usará la configuración por defecto
+      // que funciona en el 99% de los casos.
       final bool didAuthenticate = await auth.authenticate(
-        localizedReason: 'Toca el sensor para entrar a Nutri_IA',
+        localizedReason: 'Toca el sensor o mira la cámara para entrar',
       );
 
       if (didAuthenticate) {
-        // Solo dejamos pasar si ya existe un usuario recordado por Firebase
-        if (FirebaseAuth.instance.currentUser != null) {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
           _goToDashboard();
         } else {
-          _showError("Por seguridad, inicia sesión con contraseña primero.");
+          _showError("Primero inicia sesión con contraseña para vincular.");
         }
       }
+    } on PlatformException catch (e) {
+      // Ignoramos el error "NotAvailable" que pasa a veces al cancelar
+      if (e.code == 'NotAvailable') return;
+      _showError("Error: ${e.message}");
     } catch (e) {
-      // Ignoramos el error técnico y solo avisamos
-      debugPrint("Error Auth: $e");
-      _showError("No se pudo leer la huella.");
+      _showError("No se pudo autenticar.");
     }
   }
 
@@ -85,6 +90,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF050505), // Fondo negro puro para que resalte el neón
       body: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Center(
@@ -92,19 +98,64 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.fingerprint, size: 80, color: Color(0xFF00E676)),
+                // --- AQUÍ ESTÁ EL CAMBIO: TU LOGO CON BRILLO ---
+                Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF00E676).withOpacity(0.4), // Brillo verde matrix
+                        blurRadius: 30,
+                        spreadRadius: 5,
+                      )
+                    ],
+                  ),
+                  child: Image.asset(
+                    'assets/icon/icon.png', // Tu logo real
+                    height: 120,            // Un buen tamaño
+                    width: 120,
+                  ),
+                ),
+
                 const SizedBox(height: 20),
-                const Text("Bienvenido", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                const Text("Bienvenido", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
                 const SizedBox(height: 40),
 
+                // Inputs con estilo oscuro
                 TextField(
                   controller: _emailController,
-                  decoration: const InputDecoration(labelText: "Correo", prefixIcon: Icon(Icons.email)),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: "Correo",
+                    labelStyle: const TextStyle(color: Colors.grey),
+                    prefixIcon: const Icon(Icons.email, color: Colors.grey),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.grey.shade800),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: const BorderSide(color: Color(0xFF00E676)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 15),
                 TextField(
                   controller: _passwordController,
-                  decoration: const InputDecoration(labelText: "Contraseña", prefixIcon: Icon(Icons.lock)),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: "Contraseña",
+                    labelStyle: const TextStyle(color: Colors.grey),
+                    prefixIcon: const Icon(Icons.lock, color: Colors.grey),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.grey.shade800),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: const BorderSide(color: Color(0xFF00E676)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
                   obscureText: true,
                 ),
                 const SizedBox(height: 25),
@@ -113,7 +164,6 @@ class _LoginPageState extends State<LoginPage> {
                     ? const CircularProgressIndicator(color: Color(0xFF00E676))
                     : Column(
                   children: [
-                    // Botón corregido (Sin el error de padding)
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -122,12 +172,14 @@ class _LoginPageState extends State<LoginPage> {
                           padding: const EdgeInsets.symmetric(vertical: 15),
                           backgroundColor: const Color(0xFF00E676),
                           foregroundColor: Colors.black,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
-                        child: const Text("ENTRAR"),
+                        child: const Text("ENTRAR", style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 30),
 
+                    // Botón de Huella (Este sí lo dejamos como Icono porque es un botón)
                     IconButton(
                       iconSize: 60,
                       icon: const Icon(Icons.fingerprint, color: Color(0xFF00E676)),
@@ -139,7 +191,7 @@ class _LoginPageState extends State<LoginPage> {
                 const SizedBox(height: 20),
                 TextButton(
                   onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RegisterPage())),
-                  child: const Text("Crear Cuenta"),
+                  child: const Text("Crear Cuenta", style: TextStyle(color: Color(0xFF00E676))),
                 ),
               ],
             ),

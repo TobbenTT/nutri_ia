@@ -4,9 +4,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // Estas líneas cargan los plugins "a la antigua", lo que evita los conflictos de versiones que tienes
         classpath("com.android.tools.build:gradle:8.10.1")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.20")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
         classpath("com.google.gms:google-services:4.4.1")
     }
 }
@@ -18,11 +17,13 @@ allprojects {
     }
 }
 
-rootProject.buildDir = layout.buildDirectory.asFile.get()
+val newBuildDir = File(rootDir, "../build")
+rootProject.buildDir = newBuildDir
 
 subprojects {
-    project.buildDir = layout.buildDirectory.asFile.get().resolve(project.name)
+    project.buildDir = File(newBuildDir, project.name)
 }
+
 subprojects {
     project.evaluationDependsOn(":app")
 }

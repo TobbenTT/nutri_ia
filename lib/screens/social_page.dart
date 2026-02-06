@@ -23,18 +23,16 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
   // --- FUNCIÓN PARA AGREGAR AMIGO ---
   Future<void> _addFriend() async {
     if (_emailController.text.isEmpty) return;
-
-    final String codeToSearch = _emailController.text.trim(); // Ahora es el código
+    final String codeToSearch = _emailController.text.trim();
 
     try {
-      // BÚSQUEDA POR FRIEND_CODE
       final query = await FirebaseFirestore.instance
           .collection('users')
-          .where('friend_code', isEqualTo: codeToSearch) // <--- Cambio clave
+          .where('friend_code', isEqualTo: codeToSearch)
           .get();
 
       if (query.docs.isEmpty) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Código no encontrado. Revisa mayúsculas/minúsculas.")));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Código no encontrado.")));
         return;
       }
 
@@ -46,14 +44,13 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
         return;
       }
 
-      // El resto sigue igual (agregar a la lista)
       await FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).update({
         'friends': FieldValue.arrayUnion([friendId])
       });
 
       _emailController.clear();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("¡${friendDoc['name']} agregado al equipo!")));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("¡${friendDoc['name']} agregado!")));
         Navigator.pop(context);
       }
 
@@ -62,24 +59,30 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
     }
   }
 
-  // --- DIÁLOGO DE BÚSQUEDA ---
   void _showAddFriendDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Agregar Amigo"),
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text("Agregar Amigo", style: TextStyle(color: Colors.white)),
         content: TextField(
           controller: _emailController,
-          // Busca _showAddFriendDialog y cambia el TextField:
+          style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
             labelText: "Código de Amigo",
-            hintText: "Ej: David#4521", // <--- Nuevo ejemplo
-            prefixIcon: Icon(Icons.tag),
+            hintText: "Ej: David#4521",
+            labelStyle: TextStyle(color: Colors.grey),
+            hintStyle: TextStyle(color: Colors.grey),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
-          ElevatedButton(onPressed: _addFriend, child: const Text("Agregar")),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.red))),
+          ElevatedButton(
+              onPressed: _addFriend,
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+              child: const Text("Agregar", style: TextStyle(color: Colors.black))
+          ),
         ],
       ),
     );
@@ -88,26 +91,34 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF050505), // Fondo oscuro
       appBar: AppBar(
-        // AQUI ESTÁ EL CAMBIO: Título dinámico con tu ID
+        backgroundColor: Colors.transparent,
         title: StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).snapshots(),
           builder: (context, snapshot) {
-            String myCode = "..."; // Texto mientras carga
+            String myCode = "...";
+            bool amIDonor = false;
 
             if (snapshot.hasData && snapshot.data!.data() != null) {
               final data = snapshot.data!.data() as Map<String, dynamic>;
-              // Si el campo 'friend_code' no existe (usuarios viejos), muestra "Sin Código"
               myCode = data['friend_code'] ?? "Sin Código";
+              amIDonor = data['is_donor'] ?? false; // <--- LEEMOS SI SOY DONADOR
             }
 
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("Comunidad"),
+                Row(
+                  children: [
+                    const Text("Comunidad", style: TextStyle(color: Colors.white)),
+                    const SizedBox(width: 5),
+                    if (amIDonor) const Icon(Icons.verified, color: Colors.amber, size: 16), // Corona para mí
+                  ],
+                ),
                 Text(
                   "Tu ID: $myCode",
-                  style: const TextStyle(fontSize: 14, color: Colors.greenAccent),
+                  style: const TextStyle(fontSize: 14, color: Color(0xFF00E676)),
                 ),
               ],
             );
@@ -127,10 +138,7 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
       body: TabBarView(
         controller: _tabController,
         children: [
-          // PESTAÑA 1: RANKING
           _buildRankingTab(),
-
-          // PESTAÑA 2: LISTA DE AMIGOS
           _buildFriendsList(),
         ],
       ),
@@ -148,28 +156,24 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-        // Obtenemos la lista de IDs de amigos + el mío
         final userData = snapshot.data!.data() as Map<String, dynamic>?;
         List<dynamic> friendsIds = userData?['friends'] ?? [];
-        friendsIds.add(currentUser!.uid); // Me incluyo para competir
+        friendsIds.add(currentUser!.uid);
 
-        // Consultamos los datos de todos esos usuarios
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection('users')
-              .where(FieldPath.documentId, whereIn: friendsIds) // Filtro mágico
+              .where(FieldPath.documentId, whereIn: friendsIds)
               .snapshots(),
           builder: (context, friendsSnapshot) {
             if (!friendsSnapshot.hasData) return const Center(child: CircularProgressIndicator());
 
             final users = friendsSnapshot.data!.docs;
 
-            // Ordenamos por puntaje (social_score) de mayor a menor
-            // Nota: Aquí podrías ordenar por quién comió MÁS o MENOS, depende la competencia
             users.sort((a, b) {
               int scoreA = (a.data() as Map)['social_score'] ?? 0;
               int scoreB = (b.data() as Map)['social_score'] ?? 0;
-              return scoreB.compareTo(scoreA); // Descendente
+              return scoreB.compareTo(scoreA);
             });
 
             return ListView.builder(
@@ -181,23 +185,53 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
                 final score = userDoc['social_score'] ?? 0;
                 final bool isMe = users[index].id == currentUser!.uid;
 
-                // Trofeos para los top 3
-                Widget? trophy;
-                if (index == 0) trophy = const Text("🥇", style: TextStyle(fontSize: 24));
-                if (index == 1) trophy = const Text("🥈", style: TextStyle(fontSize: 24));
-                if (index == 2) trophy = const Text("🥉", style: TextStyle(fontSize: 24));
+                // --- AQUÍ DETECTAMOS AL DONADOR ---
+                final bool isDonor = userDoc['is_donor'] ?? false;
+
+                // Definimos el icono de medalla
+                Widget? trailingIcon;
+                if (index == 0) trailingIcon = const Text("🥇", style: TextStyle(fontSize: 24));
+                if (index == 1) trailingIcon = const Text("🥈", style: TextStyle(fontSize: 24));
+                if (index == 2) trailingIcon = const Text("🥉", style: TextStyle(fontSize: 24));
+                if (index > 2) trailingIcon = Text("#${index + 1}", style: const TextStyle(color: Colors.grey));
 
                 return Card(
-                  color: isMe ? const Color(0xFF2C3E50) : const Color(0xFF1E1E1E), // Resaltar mi usuario
+                  color: isMe ? const Color(0xFF2C3E50) : const Color(0xFF1E1E1E),
                   margin: const EdgeInsets.only(bottom: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    side: isDonor
+                        ? const BorderSide(color: Colors.amber, width: 1.5) // Borde dorado si es donador
+                        : BorderSide.none,
+                  ),
                   child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: Colors.grey[800],
-                      child: Text(name[0].toUpperCase(), style: const TextStyle(color: Colors.white)),
+                    leading: Stack(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: Colors.grey[800],
+                          backgroundImage: (userDoc['photoUrl'] != null) ? NetworkImage(userDoc['photoUrl']) : null,
+                          child: (userDoc['photoUrl'] == null) ? Text(name[0].toUpperCase()) : null,
+                        ),
+                        // Corona en la foto de perfil
+                        if (isDonor)
+                          const Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Icon(Icons.verified, color: Colors.amber, size: 16),
+                          ),
+                      ],
                     ),
-                    title: Text(name, style: TextStyle(fontWeight: FontWeight.bold, color: isMe ? const Color(0xFF00E676) : Colors.white)),
-                    subtitle: Text("$score kcal hoy"),
-                    trailing: trophy ?? Text("#${index + 1}", style: const TextStyle(color: Colors.grey)),
+                    title: Row(
+                      children: [
+                        Text(name, style: TextStyle(fontWeight: FontWeight.bold, color: isMe ? const Color(0xFF00E676) : Colors.white)),
+                        if (isDonor) ...[
+                          const SizedBox(width: 5),
+                          const Text("PRO", style: TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.bold)),
+                        ]
+                      ],
+                    ),
+                    subtitle: Text("$score pts", style: const TextStyle(color: Colors.grey)),
+                    trailing: trailingIcon,
                   ),
                 );
               },
@@ -209,18 +243,14 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
   }
 
   Widget _buildFriendsList() {
-    // Reutilizamos lógica similar pero solo mostramos lista simple
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
         final userData = snapshot.data!.data() as Map<String, dynamic>?;
         List<dynamic> friendsIds = userData?['friends'] ?? [];
 
-        if (friendsIds.isEmpty) {
-          return const Center(child: Text("Aún no tienes amigos. ¡Invita a alguien!", style: TextStyle(color: Colors.grey)));
-        }
+        if (friendsIds.isEmpty) return const Center(child: Text("Sin amigos aún.", style: TextStyle(color: Colors.grey)));
 
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance.collection('users').where(FieldPath.documentId, whereIn: friendsIds).snapshots(),
@@ -230,15 +260,22 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
             return ListView(
               children: listSnap.data!.docs.map((doc) {
                 final d = doc.data() as Map<String, dynamic>;
+                final bool isDonor = d['is_donor'] ?? false; // Leemos si es donador
+
                 return ListTile(
                   leading: const Icon(Icons.person, color: Color(0xFF00E676)),
-                  title: Text(d['name'] ?? "Usuario"),
-                  subtitle: Text(d['email'] ?? ""),
+                  title: Row(
+                    children: [
+                      Text(d['name'] ?? "Usuario", style: const TextStyle(color: Colors.white)),
+                      if (isDonor) const Padding(
+                        padding: EdgeInsets.only(left: 5),
+                        child: Icon(Icons.star, color: Colors.amber, size: 16),
+                      )
+                    ],
+                  ),
                   trailing: IconButton(
                     icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
-                    onPressed: () {
-                      // Lógica para borrar amigo (opcional)
-                    },
+                    onPressed: () {},
                   ),
                 );
               }).toList(),

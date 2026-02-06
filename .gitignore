@@ -52,3 +52,4 @@ android/.gradle/
 *.mobileprovision
 *.p12
 ios/Runner/GoogleService-Info.plist
+*.hprof
