@@ -3,11 +3,18 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'screens/login_page.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // <--- Ya lo importaste, bien.
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await Firebase.initializeApp();
+
+  // ⚠️ ESTA ES LA LÍNEA QUE FALTABA:
+  await dotenv.load(fileName: ".env");
+
   await initializeDateFormatting();
+
   runApp(const MyApp());
 }
 
@@ -24,9 +31,6 @@ class MyApp extends StatelessWidget {
         // FONDO NEGRO PURO CYBERPUNK
         scaffoldBackgroundColor: const Color(0xFF050505),
         primaryColor: const Color(0xFF00FF88), // Verde Neón
-
-        // ELIMINAMOS "cardTheme" AQUÍ PARA EVITAR EL ERROR DE VERSIÓN
-        // Los estilos se aplicarán por defecto o localmente
 
         // Fuente estilo tech
         textTheme: GoogleFonts.poppinsTextTheme(Theme.of(context).textTheme).apply(

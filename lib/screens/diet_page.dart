@@ -3,6 +3,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http; // Peticiones directas a internet
 import 'package:image_picker/image_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // <--- NUEVO: Para saber quién es el usuario
+import 'package:cloud_firestore/cloud_firestore.dart'; // <--- NUEVO: Para chequear si pagó
+import 'api_config.dart'; // Tu archivo de clave
+import 'settings_page.dart'; // Para redirigir a la página de donación si es necesario
 
 class DietPage extends StatefulWidget {
   const DietPage({super.key});
@@ -12,25 +16,59 @@ class DietPage extends StatefulWidget {
 }
 
 class _DietPageState extends State<DietPage> {
-  // ----------------------------------------------------------
-  // 🔑 TU API KEY AQUÍ (Pégala dentro de las comillas)
-  // ----------------------------------------------------------
-  final String apiKey = "PON_AQUI_TU_API_KEY_REAL";
-  // ----------------------------------------------------------
-
+  final String apiKey = ApiConfig.geminiApiKey;
   final TextEditingController _textController = TextEditingController();
-  final List<Map<String, dynamic>> _messages = []; // Historial simple del chat
+  final List<Map<String, dynamic>> _messages = [];
   bool _isLoading = false;
   final ImagePicker _picker = ImagePicker();
+
+  // VARIABLES DE CONTROL VIP
+  bool _checkingStatus = true; // ¿Estamos cargando los datos del usuario?
+  bool _canAccess = false; // ¿Tiene permiso para entrar?
+  final String adminEmail = "david.cabezas.armando@gmail.com"; // Para que tú siempre entres
 
   @override
   void initState() {
     super.initState();
-    // Mensaje de bienvenida del bot
-    _addMessage("¡Hola! Soy tu Nutri Chef IA 👨‍🍳.\nEnvíame una foto de tu comida (¡incluso un completo!) y te diré sus calorías.", false);
+    _checkAccess(); // Verificamos permisos antes de saludar
   }
 
-  // Función auxiliar para agregar mensajes al chat visualmente
+  // 🔒 FUNCIÓN DE SEGURIDAD: VERIFICA SI ES DONADOR
+  Future<void> _checkAccess() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      // 1. Verificar si es el Admin (Tú)
+      if (user.email == adminEmail) {
+        setState(() {
+          _canAccess = true;
+          _checkingStatus = false;
+        });
+        _addMessage("¡Bienvenido Creador! 🛡️ Modo Dios activado.", false);
+        return;
+      }
+
+      // 2. Verificar en Firebase si es Donador
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final bool isDonor = doc.data()?['is_donor'] ?? false;
+
+      if (mounted) {
+        setState(() {
+          _canAccess = isDonor;
+          _checkingStatus = false;
+        });
+
+        if (isDonor) {
+          _addMessage("¡Hola VIP! 👑 Soy tu Chef IA exclusivo.\nMándame foto de tu comida y te calculo todo.", false);
+        }
+      }
+    } catch (e) {
+      debugPrint("Error verificando acceso: $e");
+      setState(() => _checkingStatus = false);
+    }
+  }
+
   void _addMessage(String text, bool isUser, {Uint8List? image, bool isError = false}) {
     setState(() {
       _messages.add({
@@ -42,31 +80,24 @@ class _DietPageState extends State<DietPage> {
     });
   }
 
-  // 🔥 EL CORAZÓN DEL SISTEMA: Enviar datos a Google manualmente
+  // 🔥 LÓGICA IA ACTUALIZADA (GEMINI 3 - 2026)
   Future<void> _sendToGemini({String? textInput, Uint8List? imageBytes}) async {
     setState(() => _isLoading = true);
 
     try {
-      // 1. URL DEL ENDPOINT (La dirección web de la IA)
-      // Usamos el modelo "gemini-1.5-flash" que es rápido y acepta imágenes
+      // ✅ CAMBIO CRÍTICO: Usamos Gemini 3 Flash Preview (Vigente en 2026)
       final url = Uri.parse(
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey'
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=$apiKey'
       );
 
-      // 2. CONSTRUIR EL PAQUETE DE DATOS (JSON)
-      // Aquí "empaquetamos" el texto y la foto (en Base64)
       List<Map<String, dynamic>> parts = [];
 
-      // A) Si el usuario escribió texto, lo agregamos
       if (textInput != null && textInput.isNotEmpty) {
         parts.add({"text": textInput});
-      }
-      // B) Si mandó foto pero no escribió, ponemos un texto por defecto
-      else if (imageBytes != null) {
-        parts.add({"text": "Analiza esta imagen detalladamente. Identifica la comida (ej: completo italiano, cazuela, etc) y estima sus calorías y macronutrientes."});
+      } else if (imageBytes != null) {
+        parts.add({"text": "Analiza esta imagen detalladamente. Identifica la comida, estima sus calorías totales y dame los macronutrientes aproximados. Responde como un chef experto."});
       }
 
-      // C) Si hay imagen, la convertimos a Base64 (La "Licuadora de Píxeles")
       if (imageBytes != null) {
         String base64Image = base64Encode(imageBytes);
         parts.add({
@@ -77,94 +108,136 @@ class _DietPageState extends State<DietPage> {
         });
       }
 
-      // Armamos el cuerpo final del mensaje
       final body = jsonEncode({
-        "contents": [
-          {
-            "parts": parts
-          }
-        ]
+        "contents": [{"parts": parts}]
       });
 
-      // 3. ENVIAR LA CARTA (Petición POST)
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
         body: body,
       );
 
-      // 4. LEER LA RESPUESTA
       if (response.statusCode == 200) {
-        // ÉXITO: Desempaquetamos el JSON que nos devolvió Google
         final data = jsonDecode(response.body);
-
-        // Buscamos el texto escondido en la estructura de Google
-        String botReply = data['candidates'][0]['content']['parts'][0]['text'];
-
-        _addMessage(botReply, false);
+        if (data['candidates'] != null && data['candidates'].isNotEmpty) {
+          String botReply = data['candidates'][0]['content']['parts'][0]['text'];
+          _addMessage(botReply, false);
+        }
       } else {
-        // ERROR: Si Google rechaza, mostramos por qué (Error 400, 403, etc.)
-        _addMessage("Error del servidor (${response.statusCode}):\n${response.body}", false, isError: true);
+        _addMessage("Error IA (${response.statusCode}).", false, isError: true);
+        debugPrint(response.body);
       }
 
     } catch (e) {
-      _addMessage("Error de conexión: $e", false, isError: true);
+      _addMessage("Error de conexión.", false, isError: true);
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
-  // Lógica al presionar enviar texto
   void _handleTextSubmit() {
     String text = _textController.text.trim();
     if (text.isEmpty) return;
-
-    _addMessage(text, true); // Mostrar mensaje del usuario
+    _addMessage(text, true);
     _textController.clear();
-
-    _sendToGemini(textInput: text); // Enviar a la IA
+    _sendToGemini(textInput: text);
   }
 
-  // Lógica al presionar los botones de cámara/galería
   Future<void> _handleImageSubmit(ImageSource source) async {
     try {
-      // 1. Tomar la foto y comprimirla (para que suba rápido)
-      final XFile? image = await _picker.pickImage(
-          source: source,
-          maxWidth: 800,
-          maxHeight: 800,
-          imageQuality: 80
-      );
-
-      if (image == null) return; // Usuario canceló
-
-      // 2. Leer los bytes de la imagen
+      final XFile? image = await _picker.pickImage(source: source, maxWidth: 800, imageQuality: 80);
+      if (image == null) return;
       Uint8List bytes = await image.readAsBytes();
-
-      // 3. Mostrar la foto en el chat
       _addMessage("Analizando foto... 📸", true, image: bytes);
-
-      // 4. Enviar a la IA
       _sendToGemini(imageBytes: bytes);
-
     } catch (e) {
-      _addMessage("No se pudo cargar la foto: $e", false, isError: true);
+      _addMessage("Error con la foto.", false, isError: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // 1. PANTALLA DE CARGA (Verificando si pagó)
+    if (_checkingStatus) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF050505),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFFFFD700))),
+      );
+    }
+
+    // 2. PANTALLA DE BLOQUEO (Si no es Donador)
+    if (!_canAccess) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF050505),
+        appBar: AppBar(
+          title: const Text("Acceso Restringido", style: TextStyle(color: Colors.white)),
+          backgroundColor: Colors.transparent,
+          iconTheme: const IconThemeData(color: Colors.white),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(30),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.amber, width: 2),
+                  ),
+                  child: const Icon(Icons.lock, size: 80, color: Colors.amber),
+                ),
+                const SizedBox(height: 30),
+                const Text(
+                  "Función Exclusiva VIP",
+                  style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 15),
+                const Text(
+                  "El Nutri Chef IA consume muchos recursos y es exclusivo para quienes apoyan el proyecto.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey, fontSize: 16),
+                ),
+                const SizedBox(height: 40),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    // Navega a la página de donaciones
+                    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const DonationPage()));
+                  },
+                  icon: const Icon(Icons.star, color: Colors.black),
+                  label: const Text("CONVERTIRSE EN VIP", style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFD700),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Volver", style: TextStyle(color: Colors.grey)),
+                )
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 3. PANTALLA DEL CHAT (Si es VIP o Admin)
     return Scaffold(
       backgroundColor: const Color(0xFF050505),
       appBar: AppBar(
-        title: const Text("Nutri Chef IA 🤖", style: TextStyle(color: Colors.white)),
+        title: const Text("Nutri Chef IA 👑", style: TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Column(
         children: [
-          // ZONA DE CHAT (Lista de mensajes)
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(20),
@@ -175,36 +248,27 @@ class _DietPageState extends State<DietPage> {
               },
             ),
           ),
-
-          // BARRA DE CARGA
-          if (_isLoading)
-            const LinearProgressIndicator(color: Color(0xFF00FF88), backgroundColor: Colors.transparent),
-
-          // ZONA DE INPUT (Botones y texto)
+          if (_isLoading) const LinearProgressIndicator(color: Color(0xFFFFD700), backgroundColor: Colors.transparent),
           _buildInputArea(),
         ],
       ),
     );
   }
 
-  // Widget para la barra inferior
   Widget _buildInputArea() {
     return Container(
       padding: const EdgeInsets.all(10),
       color: const Color(0xFF1E1E1E),
       child: Row(
         children: [
-          // Botón Cámara
           IconButton(
-            icon: const Icon(Icons.camera_alt, color: Color(0xFF00FF88)),
+            icon: const Icon(Icons.camera_alt, color: Color(0xFFFFD700)),
             onPressed: _isLoading ? null : () => _handleImageSubmit(ImageSource.camera),
           ),
-          // Botón Galería
           IconButton(
             icon: const Icon(Icons.photo, color: Colors.white),
             onPressed: _isLoading ? null : () => _handleImageSubmit(ImageSource.gallery),
           ),
-          // Campo de Texto
           Expanded(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 15),
@@ -216,7 +280,7 @@ class _DietPageState extends State<DietPage> {
                 controller: _textController,
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
-                  hintText: "Escribe aquí...",
+                  hintText: "Pregúntale al Chef...",
                   hintStyle: TextStyle(color: Colors.grey),
                   border: InputBorder.none,
                 ),
@@ -225,9 +289,8 @@ class _DietPageState extends State<DietPage> {
             ),
           ),
           const SizedBox(width: 8),
-          // Botón Enviar
           CircleAvatar(
-            backgroundColor: const Color(0xFF00FF88),
+            backgroundColor: const Color(0xFFFFD700),
             child: IconButton(
               icon: const Icon(Icons.send, color: Colors.black, size: 20),
               onPressed: _isLoading ? null : _handleTextSubmit,
@@ -238,7 +301,6 @@ class _DietPageState extends State<DietPage> {
     );
   }
 
-  // Widget para las burbujas de chat
   Widget _buildBubble(Map<String, dynamic> msg) {
     bool isUser = msg['isUser'];
     bool isError = msg['isError'];
@@ -248,25 +310,19 @@ class _DietPageState extends State<DietPage> {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 5),
         padding: const EdgeInsets.all(15),
-        constraints: const BoxConstraints(maxWidth: 300), // Ancho máximo de la burbuja
+        constraints: const BoxConstraints(maxWidth: 300),
         decoration: BoxDecoration(
           color: isError
               ? Colors.red.withOpacity(0.2)
-              : (isUser ? const Color(0xFF00FF88).withOpacity(0.2) : const Color(0xFF2A2A2A)),
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(15),
-            topRight: const Radius.circular(15),
-            bottomLeft: isUser ? const Radius.circular(15) : Radius.zero,
-            bottomRight: isUser ? Radius.zero : const Radius.circular(15),
-          ),
+              : (isUser ? const Color(0xFFFFD700).withOpacity(0.2) : const Color(0xFF2A2A2A)),
+          borderRadius: BorderRadius.circular(15),
           border: Border.all(
-              color: isError ? Colors.red : (isUser ? const Color(0xFF00FF88) : Colors.white10)
+              color: isError ? Colors.red : (isUser ? const Color(0xFFFFD700) : Colors.white10)
           ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Si hay foto, la mostramos
             if (msg['image'] != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10.0),
@@ -275,13 +331,9 @@ class _DietPageState extends State<DietPage> {
                   child: Image.memory(msg['image'], height: 180, width: double.infinity, fit: BoxFit.cover),
                 ),
               ),
-            // El texto del mensaje
             Text(
                 msg['text'],
-                style: TextStyle(
-                    color: isError ? Colors.redAccent : Colors.white,
-                    height: 1.4 // Espaciado para leer mejor
-                )
+                style: TextStyle(color: isError ? Colors.redAccent : Colors.white, height: 1.4)
             ),
           ],
         ),

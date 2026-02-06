@@ -53,3 +53,7 @@ android/.gradle/
 *.p12
 ios/Runner/GoogleService-Info.plist
 *.hprof
+
+
+
+.env

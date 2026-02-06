@@ -10,6 +10,8 @@ import 'social_page.dart';
 import 'settings_page.dart'; // <--- ESTO ES CRUCIAL
 import 'calendar_page.dart';
 import 'dart:convert';
+import 'api_config.dart';
+import 'package:http/http.dart' as http;
 
 // ==========================================
 // CLASE PRINCIPAL: DASHBOARD OPTIMIZADO
@@ -40,26 +42,17 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
 
-    const apiKey = 'PON_TU_API_KEY_AQUI';
-
+    // CAMBIO FINAL: Usamos la serie Gemini 3 lanzada en Dic 2025
     _model = GenerativeModel(
-      model: 'gemini-1.5-flash',
-      apiKey: apiKey,
-      // ESTA ES LA LÍNEA QUE FALTA Y QUE SOLUCIONA EL ERROR "NOT FOUND"
-      requestOptions: const RequestOptions(apiVersion: 'v1'),
-
-      // Mantenemos la configuración de seguridad para evitar bloqueos
-      safetySettings: [
-        SafetySetting(HarmCategory.harassment, HarmBlockThreshold.none),
-        SafetySetting(HarmCategory.hateSpeech, HarmBlockThreshold.none),
-        SafetySetting(HarmCategory.sexuallyExplicit, HarmBlockThreshold.none),
-        SafetySetting(HarmCategory.dangerousContent, HarmBlockThreshold.none),
-      ],
+      model: 'gemini-3-flash-preview',
+      apiKey: ApiConfig.geminiApiKey,
+      generationConfig: GenerationConfig(
+          responseMimeType: 'application/json'
+      ),
     );
 
     _loadWeeklyStats();
   }
-
 
   Future<void> _loadWeeklyStats() async {
     if (user == null) return;
@@ -157,41 +150,65 @@ class _DashboardPageState extends State<DashboardPage> {
                   onPressed: isLoading ? null : () async {
                     if (nameController.text.isEmpty) return;
                     setState(() => isLoading = true);
+
                     try {
-                      // Prompt simplificado porque forzamos el modo JSON abajo
+                      // URL CORRECTA (Alineada a Febrero 2026)
+                      final url = Uri.parse(
+                          'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${ApiConfig.geminiApiKey}'
+                      );
+
+                      // Prompt para obtener JSON
                       final prompt = "Analiza nutricionalmente: '${nameController.text}'. "
                           "Calcula calorias, proteinas, carbohidratos y grasas. "
-                          "Responde usando este esquema JSON: {\"calories\": int, \"protein\": int, \"carbs\": int, \"fat\": int}";
+                          "Responde SOLO con un JSON puro sin formato markdown: "
+                          "{\"calories\": 100, \"protein\": 10, \"carbs\": 10, \"fat\": 5}";
 
-                      final content = [Content.text(prompt)];
+                      // Cuerpo de la petición
+                      final body = jsonEncode({
+                        "contents": [
+                          {
+                            "parts": [
+                              {"text": prompt}
+                            ]
+                          }
+                        ]
+                      });
 
-                      // MAGIA AQUÍ: responseMimeType fuerza a Gemini a devolver SOLO JSON válido.
-                      final response = await _model.generateContent(
-                        content,
-                        generationConfig: GenerationConfig(
-                            responseMimeType: 'application/json',
-                            temperature: 0.2 // Baja temperatura para datos precisos
-                        ),
+                      // Hacer la petición HTTP
+                      final response = await http.post(
+                        url,
+                        headers: {'Content-Type': 'application/json'},
+                        body: body,
                       );
 
-                      // Ya no necesitamos Regex complejo porque la respuesta es JSON puro
-                      final cleanText = response.text ?? "{}";
-                      final data = jsonDecode(cleanText);
+                      if (response.statusCode == 200) {
+                        final responseData = jsonDecode(response.body);
 
-                      await _saveMeal(
-                          nameController.text,
-                          data['calories'] ?? 0,
-                          protein: data['protein'] ?? 0,
-                          carbs: data['carbs'] ?? 0,
-                          fat: data['fat'] ?? 0
-                      );
-                      if (mounted) Navigator.pop(context);
+                        // Extraer el texto de la respuesta
+                        String cleanText = responseData['candidates'][0]['content']['parts'][0]['text'];
+                        cleanText = cleanText.replaceAll("```json", "").replaceAll("```", "").trim();
+
+                        final data = jsonDecode(cleanText);
+
+                        // Guardar la comida con CORRECCIÓN DE TIPOS (Evita el crash por decimales)
+                        await _saveMeal(
+                            nameController.text,
+                            (data['calories'] as num? ?? 0).toInt(), // <--- SOLUCIÓN AQUÍ
+                            protein: (data['protein'] as num? ?? 0).toInt(),
+                            carbs: (data['carbs'] as num? ?? 0).toInt(),
+                            fat: (data['fat'] as num? ?? 0).toInt()
+                        );
+
+                        if (mounted) Navigator.pop(context);
+                      } else {
+                        throw Exception("Error ${response.statusCode}: ${response.body}");
+                      }
 
                     } catch (e) {
-                      debugPrint("ERROR IA: $e");
+                      debugPrint("🚨 ERROR DETALLADO DEL SDK: $e");
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text("Error: Verificaste tu API Key? $e"), backgroundColor: Colors.red),
+                          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
                         );
                       }
                     } finally {
@@ -210,7 +227,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   // ----------------------------------------------------------
-  // LÓGICA DE IA (CÁMARA): FOTO -> CALORÍAS
+  // LÓGICA DE IA (CÁMARA): FOTO -> CALORÍAS (CORREGIDO)
   // ----------------------------------------------------------
   Future<void> _scanFood() async {
     try {
@@ -221,45 +238,50 @@ class _DashboardPageState extends State<DashboardPage> {
       showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFF00FF88))));
 
       final bytes = await photo.readAsBytes();
+
+      // 1. Prompt claro
       final content = [
         Content.multi([
           TextPart("Identifica el alimento principal y estima sus macros. "
-              "Responde usando este esquema JSON: {\"food\": \"nombre corto\", \"calories\": int, \"protein\": int, \"carbs\": int, \"fat\": int}"),
+              "Responde SOLO con este formato JSON puro (sin markdown): "
+              "{\"food\": \"nombre corto\", \"calories\": int, \"protein\": int, \"carbs\": int, \"fat\": int}"),
           DataPart('image/jpeg', bytes),
         ])
       ];
 
-      // MAGIA AQUÍ TAMBIÉN: Forzar JSON
+      // 2. Generar contenido
       final response = await _model.generateContent(
         content,
         generationConfig: GenerationConfig(
-            responseMimeType: 'application/json',
             temperature: 0.2
         ),
       );
 
       if (!mounted) return;
-      Navigator.pop(context);
+      Navigator.pop(context); // Cerramos el loading
 
-      final cleanText = response.text ?? "{}";
+      // 3. Limpieza y Parseo
+      String cleanText = response.text ?? "{}";
+      cleanText = cleanText.replaceAll("```json", "").replaceAll("```", "").trim();
       final data = jsonDecode(cleanText);
 
+      // 4. GUARDADO SEGURO (CON .toInt() PARA EVITAR CRASH)
       await _saveMeal(
           data['food'] ?? "Comida escaneada",
-          data['calories'] ?? 0,
-          protein: data['protein'] ?? 0,
-          carbs: data['carbs'] ?? 0,
-          fat: data['fat'] ?? 0
+          (data['calories'] as num? ?? 0).toInt(), // <--- SOLUCIÓN AQUÍ
+          protein: (data['protein'] as num? ?? 0).toInt(),
+          carbs: (data['carbs'] as num? ?? 0).toInt(),
+          fat: (data['fat'] as num? ?? 0).toInt()
       );
 
     } catch (e) {
+      debugPrint("🚨 ERROR CÁMARA: $e"); // Ver error en consola
       if (mounted) {
-        Navigator.pop(context); // Cierra el loader si hay error
+        Navigator.pop(context); // Asegura cerrar el loading si falla
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al escanear: $e")));
       }
     }
   }
-
   // ----------------------------------------------------------
   // VISTAS DE LA APLICACIÓN
   // ----------------------------------------------------------
