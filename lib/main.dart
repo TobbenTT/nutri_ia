@@ -1,19 +1,53 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/date_symbol_data_local.dart';
-import 'screens/login_page.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // <--- Ya lo importaste, bien.
+import 'package:flutter/services.dart';
+// Asegúrate de que esta ruta sea correcta según tus carpetas:
+import 'services/notification_service.dart';
+import 'screens/login_page.dart'; // O tu página de inicio
+import 'screens/dashboard_page.dart'; // Por si ya está logueado
+import 'package:firebase_auth/firebase_auth.dart' as import_firebase_auth;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 1. INICIALIZAR FIREBASE (Vital)
+  // Si usas firebase_options.dart, agrega: options: DefaultFirebaseOptions.currentPlatform
   await Firebase.initializeApp();
 
-  // ⚠️ ESTA ES LA LÍNEA QUE FALTABA:
-  await dotenv.load(fileName: ".env");
+  // 2. CHALECO ANTIBALAS PARA NOTIFICACIONES 🛡️
+  // Si esto falla, la app NO se detiene.
+  try {
+    final notiService = NotificationService();
+    await notiService.init();
 
-  await initializeDateFormatting();
+    // Programamos los horarios (seguros dentro del try)
+    await notiService.scheduleDailyNotification(
+        id: 1,
+        title: "¡Buenos días! ☀️",
+        body: "No olvides registrar tu desayuno.",
+        hour: 9
+    );
+    await notiService.scheduleDailyNotification(
+        id: 2,
+        title: "Hora del almuerzo 🥗",
+        body: "¿Qué vas a comer hoy? Regístralo.",
+        hour: 14
+    );
+    await notiService.scheduleDailyNotification(
+        id: 3,
+        title: "Cena ligera 🌙",
+        body: "Cierra tu día registrando tu cena.",
+        hour: 20
+    );
+    debugPrint("✅ Notificaciones iniciadas correctamente");
+
+  } catch (e) {
+    // Si falla, solo imprimimos el error, pero la app SIGUE VIVA
+    debugPrint("⚠️ Error en notificaciones (La app iniciará sin ellas): $e");
+  }
+
+  // 3. BLOQUEAR GIRO DE PANTALLA (Opcional, se ve más pro vertical)
+  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   runApp(const MyApp());
 }
@@ -24,43 +58,39 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Nutri_IA',
       debugShowCheckedModeBanner: false,
+      title: 'Nutri IA',
       theme: ThemeData(
-        brightness: Brightness.dark,
-        // FONDO NEGRO PURO CYBERPUNK
-        scaffoldBackgroundColor: const Color(0xFF050505),
-        primaryColor: const Color(0xFF00FF88), // Verde Neón
-
-        // Fuente estilo tech
-        textTheme: GoogleFonts.poppinsTextTheme(Theme.of(context).textTheme).apply(
-          bodyColor: Colors.white,
-          displayColor: Colors.white,
-        ),
-
-        // Inputs modernos
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF1F1F1F),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-          prefixIconColor: const Color(0xFF00FF88),
-          labelStyle: const TextStyle(color: Colors.grey),
-        ),
-
-        // Botones Neón
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00FF88),
-            foregroundColor: Colors.black,
-            elevation: 10,
-            shadowColor: const Color(0xFF00FF88).withOpacity(0.5),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-            textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-        ),
+        brightness: Brightness.dark, // Tema oscuro por defecto
+        primaryColor: const Color(0xFF00FF88),
+        scaffoldBackgroundColor: Colors.black,
         useMaterial3: true,
       ),
-      home: const LoginPage(),
+      // Aquí decides a dónde ir. Si usas FirebaseAuth, puedes validar si hay usuario.
+      home: const AuthWrapper(),
     );
   }
 }
+
+// Pequeño widget para decidir si ir al Login o al Dashboard
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // Escucha cambios en la autenticación en tiempo real
+    return StreamBuilder(
+      stream: import_firebase_auth.FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator(color: Color(0xFF00FF88)));
+        }
+        if (snapshot.hasData) {
+          return const DashboardPage(); // Usuario logueado -> Dashboard
+        }
+        return const LoginPage(); // No logueado -> Login
+      },
+    );
+  }
+}
+

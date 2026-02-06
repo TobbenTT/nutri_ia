@@ -6,6 +6,7 @@ import 'diet_page.dart';
 import 'admin_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'login_page.dart';
+import 'edit_profile_page.dart';
 
 // =======================================================
 // SETTINGS PAGE - CON STREAMBUILDER (DETECTA VIP EN VIVO)
@@ -414,6 +415,20 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
 
                   const SizedBox(height: 30),
+
+                  ListTile(
+                    leading: const Icon(Icons.edit, color: Color(0xFF00FF88)),
+                    title: const Text("Editar Meta y Nombre", style: TextStyle(color: Colors.white)),
+                    subtitle: const Text("Cambia tus calorías diarias", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    trailing: const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
+                    onTap: () {
+                      // Navegar a la página nueva sin romper la actual
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const EditProfilePage()),
+                      );
+                    },
+                  ),
 
 
                   // BOTÓN CERRAR SESIÓN
@@ -929,6 +944,8 @@ class _PhysicalProfilePageState extends State<PhysicalProfilePage> {
     );
   }
 }
+
+
 
 // =======================================================
 // PÁGINA: DONACIONES (SIN CAMBIOS)
