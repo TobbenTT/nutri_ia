@@ -30,7 +30,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
+  mobile_scanner: ^3.5.5
   url_launcher: ^6.2.5
   http: ^1.2.0
   google_generative_ai: ^0.4.7
