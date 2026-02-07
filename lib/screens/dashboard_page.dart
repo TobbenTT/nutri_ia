@@ -9,10 +9,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart'; // Para HapticFeedback
 import 'package:fl_chart/fl_chart.dart';
-// IMPORTACIONES DE TUS OTRAS PÁGINAS
+
+// IMPORTACIONES
 import 'social_page.dart';
 import 'settings_page.dart';
 import 'calendar_page.dart';
+import 'hydration_section.dart'; // ✅ IMPORTAMOS EL NUEVO ARCHIVO
 import 'api_config.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -30,7 +32,7 @@ class _DashboardPageState extends State<DashboardPage> {
   final ImagePicker _picker = ImagePicker();
   int _selectedIndex = 0;
 
-  // META DE CALORÍAS (Dinámica)
+  // METAS
   int dailyGoal = 2000;
 
   // CACHE PARA DATOS DEL GRÁFICO
@@ -39,9 +41,9 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
-    // ✅ Gemini 3 Flash
+    // ✅ Gemini Config
     _model = GenerativeModel(
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash',
       apiKey: ApiConfig.geminiApiKey,
       generationConfig: GenerationConfig(responseMimeType: 'application/json'),
     );
@@ -50,7 +52,7 @@ class _DashboardPageState extends State<DashboardPage> {
     _loadWeeklyStats();
   }
 
-  // Agrega esta función dentro de _DashboardPageState en dashboard_page.dart
+  // Actualizar Racha
   Future<void> _updateStreak() async {
     if (user == null) return;
 
@@ -66,28 +68,21 @@ class _DashboardPageState extends State<DashboardPage> {
     int currentStreak = data['current_streak'] ?? 0;
     String lastEntryDate = data['last_entry_date'] ?? "";
 
-    // 1. Si ya registró algo hoy, no hacemos nada (evita subir la racha infinitamente el mismo día)
     if (lastEntryDate == todayStr) return;
 
-    // 2. Si el último registro fue AYER, la racha aumenta
     if (lastEntryDate == yesterdayStr) {
       currentStreak++;
-    }
-    // 3. Si no registró ayer y no es hoy, la racha se reinicia a 1 (empezando de nuevo)
-    else {
+    } else {
       currentStreak = 1;
     }
 
-    // 4. Actualizamos Firebase con el nuevo conteo
     await userDoc.update({
       'current_streak': currentStreak,
       'last_entry_date': todayStr,
     });
-
-    debugPrint("🔥 Racha actualizada en base de datos: $currentStreak");
   }
 
-  // 📥 CARGAR META DEL USUARIO
+  // Cargar meta de calorías
   Future<void> _loadUserGoal() async {
     if (user == null) return;
     try {
@@ -102,12 +97,11 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // 1. FUNCIÓN PARA CARGAR DATOS DE LA SEMANA
+  // Cargar estadísticas semanales
   Future<void> _loadWeeklyStats() async {
     if (user == null) return;
 
     Map<int, double> tempStats = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0};
-
     final now = DateTime.now();
     final startOfPeriod = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6));
 
@@ -126,7 +120,6 @@ class _DashboardPageState extends State<DashboardPage> {
           final date = ts.toDate();
           final dateDay = DateTime(date.year, date.month, date.day);
           final todayDay = DateTime(now.year, now.month, now.day);
-
           final diff = todayDay.difference(dateDay).inDays;
 
           if (diff >= 0 && diff <= 6) {
@@ -141,7 +134,7 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // 2. WIDGET DEL GRÁFICO
+  // WIDGET DEL GRÁFICO
   Widget _buildStatsView() {
     final themeColor = Theme.of(context).primaryColor;
 
@@ -214,17 +207,12 @@ class _DashboardPageState extends State<DashboardPage> {
                   topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                   rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 ),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10, strokeWidth: 1),
-                ),
+                gridData: FlGridData(show: true, drawVerticalLine: false, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10, strokeWidth: 1)),
                 borderData: FlBorderData(show: false),
                 barGroups: _chartCache.entries.map((e) {
                   final index = e.key;
                   final cals = e.value;
                   final isOverLimit = cals > dailyGoal;
-
                   return BarChartGroupData(
                     x: index,
                     barRods: [
@@ -234,9 +222,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         width: 16,
                         borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
                         backDrawRodData: BackgroundBarChartRodData(
-                          show: true,
-                          toY: dailyGoal.toDouble(),
-                          color: const Color(0xFF2A2A2A),
+                          show: true, toY: dailyGoal.toDouble(), color: const Color(0xFF2A2A2A),
                         ),
                       ),
                     ],
@@ -245,30 +231,8 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
             ),
           ),
-
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _legendItem(themeColor, "Bien"),
-              const SizedBox(width: 20),
-              _legendItem(Colors.redAccent, "Exceso"),
-              const SizedBox(width: 20),
-              _legendItem(const Color(0xFF2A2A2A), "Meta: $dailyGoal"),
-            ],
-          ),
         ],
       ),
-    );
-  }
-
-  Widget _legendItem(Color color, String text) {
-    return Row(
-      children: [
-        Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 6),
-        Text(text, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-      ],
     );
   }
 
@@ -287,11 +251,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
       final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final query = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user!.uid)
-          .collection('meals')
-          .where('date_str', isEqualTo: todayStr)
-          .get();
+          .collection('users').doc(user!.uid).collection('meals')
+          .where('date_str', isEqualTo: todayStr).get();
 
       if (query.docs.length >= dynamicLimit) {
         if (mounted) _showLimitDialog(dynamicLimit);
@@ -311,17 +272,14 @@ class _DashboardPageState extends State<DashboardPage> {
         title: const Text("Límite Diario Alcanzado", style: TextStyle(color: Colors.white)),
         content: Text("Has alcanzado tus $limit registros gratuitos de hoy.", style: const TextStyle(color: Colors.grey)),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("OK", style: TextStyle(color: Colors.grey)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("OK", style: TextStyle(color: Colors.grey))),
         ],
       ),
     );
   }
 
   // ==========================================
-  // LÓGICA DE IA (CÁMARA Y TEXTO)
+  // LÓGICA DE IA
   // ==========================================
 
   Future<void> _scanFood() async {
@@ -353,7 +311,6 @@ class _DashboardPageState extends State<DashboardPage> {
       cleanText = cleanText.replaceAll("```json", "").replaceAll("```", "").trim();
       final data = jsonDecode(cleanText);
 
-      // --- CAMBIO AQUÍ: En lugar de guardar directo, mostramos el diálogo de revisión ---
       _showFoodReviewDialog(data, File(photo.path));
 
     } catch (e) {
@@ -379,27 +336,18 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(15),
-                child: Image.file(imageFile, height: 150, width: double.infinity, fit: BoxFit.cover),
-              ),
+              ClipRRect(borderRadius: BorderRadius.circular(15), child: Image.file(imageFile, height: 150, width: double.infinity, fit: BoxFit.cover)),
               const SizedBox(height: 20),
               _buildEditField("Nombre", nameCtrl),
               const SizedBox(height: 15),
               _buildEditField("Calorías estimadas", calCtrl, isNumber: true),
               const SizedBox(height: 10),
-              Text(
-                "Macros: P:${foodData['protein']}g C:${foodData['carbs']}g G:${foodData['fat']}g",
-                style: const TextStyle(color: Colors.grey, fontSize: 12),
-              ),
+              Text("Macros: P:${foodData['protein']}g C:${foodData['carbs']}g G:${foodData['fat']}g", style: const TextStyle(color: Colors.grey, fontSize: 12)),
             ],
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("CANCELAR", style: TextStyle(color: Colors.redAccent)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("CANCELAR", style: TextStyle(color: Colors.redAccent))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor),
             onPressed: () {
@@ -410,10 +358,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 carbs: (foodData['carbs'] as num? ?? 0).toInt(),
                 fat: (foodData['fat'] as num? ?? 0).toInt(),
               );
-              // Actualizar récord de escaneos para insignia
-              FirebaseFirestore.instance.collection('users').doc(user!.uid).update({
-                'total_scans': FieldValue.increment(1),
-              });
+              FirebaseFirestore.instance.collection('users').doc(user!.uid).update({'total_scans': FieldValue.increment(1)});
               Navigator.pop(context);
             },
             child: const Text("GUARDAR", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
@@ -438,11 +383,7 @@ class _DashboardPageState extends State<DashboardPage> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TextField(
-                    controller: nameController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(hintText: "Ej: Manzana", hintStyle: TextStyle(color: Colors.grey)),
-                  ),
+                  TextField(controller: nameController, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: "Ej: Manzana", hintStyle: TextStyle(color: Colors.grey))),
                   if (isLoading) Padding(padding: const EdgeInsets.only(top: 20), child: CircularProgressIndicator(color: Theme.of(context).primaryColor)),
                 ],
               ),
@@ -453,7 +394,6 @@ class _DashboardPageState extends State<DashboardPage> {
                     if (nameController.text.isEmpty) return;
                     bool canProceed = await _checkDailyQuota();
                     if (!canProceed) return;
-
                     setState(() => isLoading = true);
                     try {
                       await _saveMeal(nameController.text, 100);
@@ -472,36 +412,25 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   // ==========================================
-  // FUNCIONES SMART (VIP - CENA INTELIGENTE)
+  // FUNCIONES SMART
   // ==========================================
 
   Future<void> _getDinnerSuggestion(int currentCalories) async {
     if (user == null) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFFFFD700))),
-    );
-
+    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFFFFD700))));
     try {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
       final bool isVip = userDoc.data()?['is_donor'] ?? false;
-
       if (!isVip) {
         if (mounted) Navigator.pop(context);
         _showVipLockDialog();
         return;
       }
-
       int remaining = dailyGoal - currentCalories;
       if (remaining < 0) remaining = 0;
-
       final promptJson = "Sugiere cena para $remaining kcal restantes de meta $dailyGoal. Responde en JSON: {\"suggestion\": \"texto\"}";
       final contentJson = [Content.text(promptJson)];
-
       final response = await _model.generateContent(contentJson);
-
       if (mounted) {
         Navigator.pop(context);
         String cleanText = response.text ?? "{}";
@@ -509,7 +438,6 @@ class _DashboardPageState extends State<DashboardPage> {
         final data = jsonDecode(cleanText);
         _showSuggestionResult(data['suggestion'] ?? "No pude generar una sugerencia.");
       }
-
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
@@ -524,19 +452,9 @@ class _DashboardPageState extends State<DashboardPage> {
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E1E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Color(0xFFFFD700))),
-        title: const Row(
-          children: [
-            Icon(Icons.restaurant_menu, color: Color(0xFFFFD700)),
-            SizedBox(width: 10),
-            Text("El Chef Sugiere...", style: TextStyle(color: Colors.white, fontSize: 18)),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Text(text, style: const TextStyle(color: Colors.white70, height: 1.5)),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text("Gracias Chef", style: TextStyle(color: Theme.of(context).primaryColor))),
-        ],
+        title: const Row(children: [Icon(Icons.restaurant_menu, color: Color(0xFFFFD700)), SizedBox(width: 10), Text("El Chef Sugiere...", style: TextStyle(color: Colors.white, fontSize: 18))]),
+        content: SingleChildScrollView(child: Text(text, style: const TextStyle(color: Colors.white70, height: 1.5))),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("Gracias Chef", style: TextStyle(color: Theme.of(context).primaryColor)))],
       ),
     );
   }
@@ -547,17 +465,11 @@ class _DashboardPageState extends State<DashboardPage> {
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E1E),
         title: const Text("Función VIP 👑", style: TextStyle(color: Color(0xFFFFD700))),
-        content: const Text(
-          "Solo los donadores tienen acceso al Chef Personal Inteligente.",
-          style: TextStyle(color: Colors.grey),
-        ),
+        content: const Text("Solo los donadores tienen acceso al Chef Personal Inteligente.", style: TextStyle(color: Colors.grey)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("Entendido", style: TextStyle(color: Colors.grey))),
           ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const DonationPage()));
-            },
+            onPressed: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const DonationPage())); },
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700)),
             child: const Text("Hacerme VIP", style: TextStyle(color: Colors.black)),
           ),
@@ -567,7 +479,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   // ==========================================
-  // GESTIÓN DE COMIDAS (GUARDAR, BORRAR, EDITAR, COMPARTIR)
+  // GESTIÓN DE COMIDAS
   // ==========================================
 
   Future<void> _saveMeal(String name, int calories, {int protein = 0, int carbs = 0, int fat = 0}) async {
@@ -582,22 +494,16 @@ class _DashboardPageState extends State<DashboardPage> {
         'timestamp': FieldValue.serverTimestamp(),
         'date_str': DateFormat('yyyy-MM-dd').format(DateTime.now()),
       });
-      // 👇 AQUÍ ES DONDE LLAMAS A LA NUEVA FUNCIÓN DE RACHA 👇
       await _updateStreak();
-
       await _loadWeeklyStats();
       if (mounted) {
         HapticFeedback.heavyImpact();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text("Guardado: $name"),
-            backgroundColor: Theme.of(context).primaryColor
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Guardado: $name"), backgroundColor: Theme.of(context).primaryColor));
       }
     } catch (e) {
       debugPrint("Error guardando: $e");
     }
   }
-
 
   Future<void> _deleteMeal(String docId) async {
     HapticFeedback.mediumImpact();
@@ -611,11 +517,15 @@ class _DashboardPageState extends State<DashboardPage> {
     final userData = userDoc.data();
     final userName = userData?['name'] ?? user!.displayName ?? "NutriUsuario";
     final bool isVip = userData?['is_donor'] ?? false;
+    final String? userPhoto = userData?['photoUrl'];
+    final String? activeHat = userData?['active_hat'];
 
     try {
       await FirebaseFirestore.instance.collection('community_feed').add({
         'user_id': user!.uid,
         'user_name': userName,
+        'user_photo': userPhoto,
+        'active_hat': activeHat,
         'is_vip': isVip,
         'name': data['name'],
         'calories': data['calories'],
@@ -629,51 +539,11 @@ class _DashboardPageState extends State<DashboardPage> {
 
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(isPrivate ? "Publicado solo para amigos 🔒" : "Publicado en el muro global 🌍"),
-              backgroundColor: Theme.of(context).primaryColor
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(isPrivate ? "Publicado solo para amigos 🔒" : "Publicado en el muro global 🌍"), backgroundColor: Theme.of(context).primaryColor));
       }
     } catch (e) {
       debugPrint("Error compartiendo: $e");
     }
-  }
-
-  Future<void> _updateUserRecords() async {
-    if (user == null) return;
-
-    final userDoc = FirebaseFirestore.instance.collection('users').doc(user!.uid);
-    final mealsSnapshot = await userDoc.collection('meals').get();
-
-    // 1. Contar escaneos totales
-    int totalScans = mealsSnapshot.docs.length;
-
-    // 2. Calcular racha (días consecutivos con registros)
-    // Obtenemos todos los date_str únicos y los ordenamos
-    List<String> activeDays = mealsSnapshot.docs
-        .map((doc) => doc['date_str'] as String)
-        .toSet()
-        .toList();
-    activeDays.sort((a, b) => b.compareTo(a)); // De más reciente a más antiguo
-
-    int currentStreak = 0;
-    if (activeDays.isNotEmpty) {
-      // Lógica simple de racha: comparamos fechas consecutivas
-      currentStreak = activeDays.length; // Simplificación para el ejemplo
-    }
-
-    // 3. Actualizar insignias basadas en records
-    List<String> newBadges = [];
-    if (totalScans >= 50) newBadges.add('ia_master');
-    if (currentStreak >= 7) newBadges.add('streak_7');
-
-    await userDoc.update({
-      'total_scans': totalScans,
-      'current_streak': currentStreak,
-      'badges': FieldValue.arrayUnion(newBadges), // Añade sin duplicar
-    });
   }
 
   void _showEditMealDialog(String mealId, Map<String, dynamic> currentData) {
@@ -771,125 +641,126 @@ class _DashboardPageState extends State<DashboardPage> {
     final startOfDay = Timestamp.fromDate(DateTime(now.year, now.month, now.day));
     final endOfDay = Timestamp.fromDate(DateTime(now.year, now.month, now.day, 23, 59, 59));
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(user!.uid)
-          .collection('meals')
-          .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
-          .where('timestamp', isLessThanOrEqualTo: endOfDay)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: themeColor));
-
-        int totalCal = 0, totalProtein = 0, totalCarbs = 0, totalFat = 0;
-        final meals = snapshot.data!.docs;
-
-        for (var doc in meals) {
-          final data = doc.data() as Map<String, dynamic>;
-          totalCal += (data['calories'] as num? ?? 0).toInt();
-          totalProtein += (data['protein'] as num? ?? 0).toInt();
-          totalCarbs += (data['carbs'] as num? ?? 0).toInt();
-          totalFat += (data['fat'] as num? ?? 0).toInt();
-        }
-
-        final double progress = totalCal / dailyGoal;
-
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text("Dashboard", style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
-                  IconButton(
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const CalendarPage())),
-                    icon: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: const Color(0xFF1F1F1F), borderRadius: BorderRadius.circular(12)),
-                      child: Icon(Icons.calendar_month, color: themeColor),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(DateFormat('EEEE, d MMMM').format(now), style: const TextStyle(color: Colors.grey, fontSize: 14)),
-              const SizedBox(height: 30),
-              Center(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    SizedBox(
-                      width: 200, height: 200,
-                      child: CircularProgressIndicator(
-                        value: progress.clamp(0.0, 1.0),
-                        strokeWidth: 15,
-                        backgroundColor: Colors.grey.shade800,
-                        valueColor: AlwaysStoppedAnimation<Color>(themeColor),
-                      ),
-                    ),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text("$totalCal", style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.bold)),
-                        Text("de $dailyGoal kcal", style: const TextStyle(color: Colors.grey, fontSize: 14)),
-                      ],
-                    ),
-                  ],
+              const Text("Dashboard", style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+              IconButton(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const CalendarPage())),
+                icon: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: const Color(0xFF1F1F1F), borderRadius: BorderRadius.circular(12)),
+                  child: Icon(Icons.calendar_month, color: themeColor),
                 ),
-              ),
-              const SizedBox(height: 30),
-              _buildMacroRow(totalProtein, totalCarbs, totalFat),
-
-              const SizedBox(height: 20),
-              Container(
-                width: double.infinity,
-                margin: const EdgeInsets.symmetric(horizontal: 5),
-                child: ElevatedButton.icon(
-                  onPressed: () => _getDinnerSuggestion(totalCal),
-                  icon: const Icon(Icons.auto_awesome, color: Colors.black),
-                  label: const Text(
-                    "¿Qué puedo comer ahora?",
-                    style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFFD700),
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 30),
-              _buildMealsSection(meals),
-              const SizedBox(height: 30),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _showManualEntryDialog,
-                      icon: const Icon(Icons.edit, color: Colors.black),
-                      label: const Text("Agregar", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(backgroundColor: themeColor, padding: const EdgeInsets.symmetric(vertical: 15), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
-                    ),
-                  ),
-                  const SizedBox(width: 15),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _scanFood,
-                      icon: const Icon(Icons.camera_alt, color: Colors.white),
-                      label: const Text("Escanear", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF333333), padding: const EdgeInsets.symmetric(vertical: 15), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
-        );
-      },
+          const SizedBox(height: 10),
+          Text(DateFormat('EEEE, d MMMM').format(now), style: const TextStyle(color: Colors.grey, fontSize: 14)),
+          const SizedBox(height: 30),
+
+          // STREAM BUILDER PRINCIPAL (CALORÍAS Y COMIDAS)
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('users').doc(user!.uid).collection('meals')
+                .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
+                .where('timestamp', isLessThanOrEqualTo: endOfDay)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: themeColor));
+
+              int totalCal = 0, totalProtein = 0, totalCarbs = 0, totalFat = 0;
+              final meals = snapshot.data!.docs;
+
+              for (var doc in meals) {
+                final data = doc.data() as Map<String, dynamic>;
+                totalCal += (data['calories'] as num? ?? 0).toInt();
+                totalProtein += (data['protein'] as num? ?? 0).toInt();
+                totalCarbs += (data['carbs'] as num? ?? 0).toInt();
+                totalFat += (data['fat'] as num? ?? 0).toInt();
+              }
+              final double progress = totalCal / dailyGoal;
+
+              return Column(
+                children: [
+                  Center(
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SizedBox(
+                          width: 200, height: 200,
+                          child: CircularProgressIndicator(
+                            value: progress.clamp(0.0, 1.0),
+                            strokeWidth: 15,
+                            backgroundColor: Colors.grey.shade800,
+                            valueColor: AlwaysStoppedAnimation<Color>(themeColor),
+                          ),
+                        ),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text("$totalCal", style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.bold)),
+                            Text("de $dailyGoal kcal", style: const TextStyle(color: Colors.grey, fontSize: 14)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+                  _buildMacroRow(totalProtein, totalCarbs, totalFat),
+
+                  const SizedBox(height: 30),
+
+                  // ✅ AQUÍ ESTÁ EL NUEVO WIDGET IMPORTADO
+                  const HydrationSection(),
+
+                  const SizedBox(height: 30),
+
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.symmetric(horizontal: 5),
+                    child: ElevatedButton.icon(
+                      onPressed: () => _getDinnerSuggestion(totalCal),
+                      icon: const Icon(Icons.auto_awesome, color: Colors.black),
+                      label: const Text("¿Qué puedo comer ahora?", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700), padding: const EdgeInsets.symmetric(vertical: 15), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+                  _buildMealsSection(meals),
+                ],
+              );
+            },
+          ),
+
+          const SizedBox(height: 30),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _showManualEntryDialog,
+                  icon: const Icon(Icons.edit, color: Colors.black),
+                  label: const Text("Agregar", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(backgroundColor: themeColor, padding: const EdgeInsets.symmetric(vertical: 15), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+                ),
+              ),
+              const SizedBox(width: 15),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _scanFood,
+                  icon: const Icon(Icons.camera_alt, color: Colors.white),
+                  label: const Text("Escanear", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF333333), padding: const EdgeInsets.symmetric(vertical: 15), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -984,24 +855,6 @@ class _DashboardPageState extends State<DashboardPage> {
             const SizedBox(height: 8),
             Text("${value}g", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
             Text(name, style: const TextStyle(color: Colors.grey, fontSize: 10)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(color: const Color(0xFF111111), borderRadius: BorderRadius.circular(15)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(height: 10),
-            Text(value, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-            Text(title, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
           ],
         ),
       ),
