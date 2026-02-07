@@ -11,7 +11,7 @@ import 'package:flutter/services.dart'; // Para HapticFeedback
 import 'package:fl_chart/fl_chart.dart';
 // IMPORTACIONES DE TUS OTRAS PÁGINAS
 import 'social_page.dart';
-import 'settings_page.dart'; // Aquí suele estar DonationPage también
+import 'settings_page.dart';
 import 'calendar_page.dart';
 import 'api_config.dart';
 
@@ -39,15 +39,52 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
-    // ✅ CORRECCIÓN 2026: Usamos Gemini 3 Flash (el modelo 1.5 ya no existe)
+    // ✅ Gemini 3 Flash
     _model = GenerativeModel(
-      model: 'gemini-3-flash-preview', // <--- ESTE ES EL NOMBRE CORRECTO AHORA
+      model: 'gemini-3-flash-preview',
       apiKey: ApiConfig.geminiApiKey,
       generationConfig: GenerationConfig(responseMimeType: 'application/json'),
     );
 
     _loadUserGoal();
     _loadWeeklyStats();
+  }
+
+  // Agrega esta función dentro de _DashboardPageState en dashboard_page.dart
+  Future<void> _updateStreak() async {
+    if (user == null) return;
+
+    final userDoc = FirebaseFirestore.instance.collection('users').doc(user!.uid);
+    final now = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    final yesterdayStr = DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 1)));
+
+    final snapshot = await userDoc.get();
+    if (!snapshot.exists) return;
+
+    final data = snapshot.data() as Map<String, dynamic>;
+    int currentStreak = data['current_streak'] ?? 0;
+    String lastEntryDate = data['last_entry_date'] ?? "";
+
+    // 1. Si ya registró algo hoy, no hacemos nada (evita subir la racha infinitamente el mismo día)
+    if (lastEntryDate == todayStr) return;
+
+    // 2. Si el último registro fue AYER, la racha aumenta
+    if (lastEntryDate == yesterdayStr) {
+      currentStreak++;
+    }
+    // 3. Si no registró ayer y no es hoy, la racha se reinicia a 1 (empezando de nuevo)
+    else {
+      currentStreak = 1;
+    }
+
+    // 4. Actualizamos Firebase con el nuevo conteo
+    await userDoc.update({
+      'current_streak': currentStreak,
+      'last_entry_date': todayStr,
+    });
+
+    debugPrint("🔥 Racha actualizada en base de datos: $currentStreak");
   }
 
   // 📥 CARGAR META DEL USUARIO
@@ -69,7 +106,6 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _loadWeeklyStats() async {
     if (user == null) return;
 
-    // Inicializamos 7 días en 0 (0=Hace 6 días ... 6=Hoy)
     Map<int, double> tempStats = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0};
 
     final now = DateTime.now();
@@ -91,11 +127,9 @@ class _DashboardPageState extends State<DashboardPage> {
           final dateDay = DateTime(date.year, date.month, date.day);
           final todayDay = DateTime(now.year, now.month, now.day);
 
-          // Calculamos diferencia: 0=Hoy, 1=Ayer, etc.
           final diff = todayDay.difference(dateDay).inDays;
 
           if (diff >= 0 && diff <= 6) {
-            // Invertimos para el gráfico: 0=Izq (Viejo), 6=Der (Hoy)
             int chartIndex = 6 - diff;
             tempStats[chartIndex] = (tempStats[chartIndex] ?? 0) + cals;
           }
@@ -107,13 +141,14 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // 2. WIDGET DEL GRÁFICO (VERSIÓN FL_CHART 1.1.1)
+  // 2. WIDGET DEL GRÁFICO
   Widget _buildStatsView() {
+    final themeColor = Theme.of(context).primaryColor;
+
     if (_chartCache.isEmpty) {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFF00FF88)));
+      return Center(child: CircularProgressIndicator(color: themeColor));
     }
 
-    // Calcular altura máxima del gráfico
     double maxCal = dailyGoal.toDouble() + 500;
     for(var val in _chartCache.values) {
       if(val > maxCal) maxCal = val + 500;
@@ -147,7 +182,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     getTooltipItem: (group, groupIndex, rod, rodIndex) {
                       return BarTooltipItem(
                         '${rod.toY.toInt()} kcal',
-                        const TextStyle(color: Color(0xFF00FF88), fontWeight: FontWeight.bold),
+                        TextStyle(color: themeColor, fontWeight: FontWeight.bold),
                       );
                     },
                   ),
@@ -165,7 +200,7 @@ class _DashboardPageState extends State<DashboardPage> {
                           child: Text(
                             index == 6 ? 'HOY' : "${date.day}/${date.month}",
                             style: TextStyle(
-                                color: index == 6 ? const Color(0xFF00FF88) : Colors.grey,
+                                color: index == 6 ? themeColor : Colors.grey,
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold
                             ),
@@ -195,7 +230,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     barRods: [
                       BarChartRodData(
                         toY: cals,
-                        color: isOverLimit ? Colors.redAccent : const Color(0xFF00FF88),
+                        color: isOverLimit ? Colors.redAccent : themeColor,
                         width: 16,
                         borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
                         backDrawRodData: BackgroundBarChartRodData(
@@ -215,7 +250,7 @@ class _DashboardPageState extends State<DashboardPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _legendItem(const Color(0xFF00FF88), "Bien"),
+              _legendItem(themeColor, "Bien"),
               const SizedBox(width: 20),
               _legendItem(Colors.redAccent, "Exceso"),
               const SizedBox(width: 20),
@@ -299,7 +334,7 @@ class _DashboardPageState extends State<DashboardPage> {
       if (photo == null) return;
 
       if (!mounted) return;
-      showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFF00FF88))));
+      showDialog(context: context, barrierDismissible: false, builder: (_) => Center(child: CircularProgressIndicator(color: Theme.of(context).primaryColor)));
 
       final bytes = await photo.readAsBytes();
       final content = [
@@ -312,26 +347,80 @@ class _DashboardPageState extends State<DashboardPage> {
       final response = await _model.generateContent(content);
 
       if (!mounted) return;
-      Navigator.pop(context);
+      Navigator.pop(context); // Cerrar cargando
 
       String cleanText = response.text ?? "{}";
       cleanText = cleanText.replaceAll("```json", "").replaceAll("```", "").trim();
       final data = jsonDecode(cleanText);
 
-      await _saveMeal(
-          data['food'] ?? "Comida",
-          (data['calories'] as num? ?? 0).toInt(),
-          protein: (data['protein'] as num? ?? 0).toInt(),
-          carbs: (data['carbs'] as num? ?? 0).toInt(),
-          fat: (data['fat'] as num? ?? 0).toInt()
-      );
+      // --- CAMBIO AQUÍ: En lugar de guardar directo, mostramos el diálogo de revisión ---
+      _showFoodReviewDialog(data, File(photo.path));
 
     } catch (e) {
       if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+        if (Navigator.canPop(context)) Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error IA: $e")));
       }
     }
+  }
+
+  void _showFoodReviewDialog(Map<String, dynamic> foodData, File imageFile) {
+    final nameCtrl = TextEditingController(text: foodData['food'] ?? "Comida");
+    final calCtrl = TextEditingController(text: (foodData['calories'] ?? 0).toString());
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("¿Es correcto?", style: TextStyle(color: Colors.white)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(15),
+                child: Image.file(imageFile, height: 150, width: double.infinity, fit: BoxFit.cover),
+              ),
+              const SizedBox(height: 20),
+              _buildEditField("Nombre", nameCtrl),
+              const SizedBox(height: 15),
+              _buildEditField("Calorías estimadas", calCtrl, isNumber: true),
+              const SizedBox(height: 10),
+              Text(
+                "Macros: P:${foodData['protein']}g C:${foodData['carbs']}g G:${foodData['fat']}g",
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CANCELAR", style: TextStyle(color: Colors.redAccent)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor),
+            onPressed: () {
+              _saveMeal(
+                nameCtrl.text,
+                int.tryParse(calCtrl.text) ?? 0,
+                protein: (foodData['protein'] as num? ?? 0).toInt(),
+                carbs: (foodData['carbs'] as num? ?? 0).toInt(),
+                fat: (foodData['fat'] as num? ?? 0).toInt(),
+              );
+              // Actualizar récord de escaneos para insignia
+              FirebaseFirestore.instance.collection('users').doc(user!.uid).update({
+                'total_scans': FieldValue.increment(1),
+              });
+              Navigator.pop(context);
+            },
+            child: const Text("GUARDAR", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showManualEntryDialog() {
@@ -354,7 +443,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     style: const TextStyle(color: Colors.white),
                     decoration: const InputDecoration(hintText: "Ej: Manzana", hintStyle: TextStyle(color: Colors.grey)),
                   ),
-                  if (isLoading) const Padding(padding: EdgeInsets.only(top: 20), child: CircularProgressIndicator(color: Color(0xFF00FF88))),
+                  if (isLoading) Padding(padding: const EdgeInsets.only(top: 20), child: CircularProgressIndicator(color: Theme.of(context).primaryColor)),
                 ],
               ),
               actions: [
@@ -367,14 +456,11 @@ class _DashboardPageState extends State<DashboardPage> {
 
                     setState(() => isLoading = true);
                     try {
-                      // Guardado manual simple
-                      await _saveMeal(nameController.text, 100); // 100 kcal por defecto si es manual simple
+                      await _saveMeal(nameController.text, 100);
                       if (mounted) Navigator.pop(context);
-                    } catch (e) {
-                      // Manejo error
-                    }
+                    } catch (e) {}
                   },
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00FF88)),
+                  style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor),
                   child: const Text("Guardar", style: TextStyle(color: Colors.black)),
                 ),
               ],
@@ -389,12 +475,9 @@ class _DashboardPageState extends State<DashboardPage> {
   // FUNCIONES SMART (VIP - CENA INTELIGENTE)
   // ==========================================
 
-  // 🧠 FUNCIÓN SMART: SUGERENCIA DE CENA (SOLO VIP)
   Future<void> _getDinnerSuggestion(int currentCalories) async {
-    // 1. Verificar si es VIP
     if (user == null) return;
 
-    // Mostrar carga
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -405,44 +488,25 @@ class _DashboardPageState extends State<DashboardPage> {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
       final bool isVip = userDoc.data()?['is_donor'] ?? false;
 
-      // ⛔ BLOQUEO PARA GRATUITOS
       if (!isVip) {
-        if (mounted) Navigator.pop(context); // Cerrar carga
-        _showVipLockDialog(); // Mostrar alerta de venta
+        if (mounted) Navigator.pop(context);
+        _showVipLockDialog();
         return;
       }
 
-      // 2. Calcular lo que falta
       int remaining = dailyGoal - currentCalories;
       if (remaining < 0) remaining = 0;
 
-      // 3. Consultar a Gemini (Texto simple, no consume visión)
-      final prompt = "Actúa como un chef nutricionista experto. A mi usuario le quedan exactamente $remaining calorías para llegar a su meta de hoy ($dailyGoal kcal en total). "
-          "Sugiere UNA opción de cena detallada que se ajuste a esas calorías restantes. "
-          "Formato: Nombre del plato, ingredientes clave y por qué es bueno. Sé breve y motivador. Usa emojis.";
-
-      // Usamos Content.text porque es una consulta de texto
-      final content = [Content.text(prompt)];
-
-      // Nota: Asegúrate de que tu modelo soporte generateContent sin JSON si el prompt pide texto libre,
-      // o ajusta el prompt para pedir JSON si tu configuración global lo fuerza.
-      // Aquí asumimos que el modelo responderá texto libre o JSON según se le pida.
-      // Si tu modelo está forzado a JSON en initState, Gemini intentará dar JSON.
-      // Ajuste rápido: Pedimos JSON para no romper la config del initState
-
-      final promptJson = "$prompt Responde en JSON: {\"suggestion\": \"texto de la sugerencia\"}";
+      final promptJson = "Sugiere cena para $remaining kcal restantes de meta $dailyGoal. Responde en JSON: {\"suggestion\": \"texto\"}";
       final contentJson = [Content.text(promptJson)];
 
       final response = await _model.generateContent(contentJson);
 
       if (mounted) {
-        Navigator.pop(context); // Cerrar carga
-
-        // Decodificamos el JSON
+        Navigator.pop(context);
         String cleanText = response.text ?? "{}";
         cleanText = cleanText.replaceAll("```json", "").replaceAll("```", "").trim();
         final data = jsonDecode(cleanText);
-
         _showSuggestionResult(data['suggestion'] ?? "No pude generar una sugerencia.");
       }
 
@@ -454,7 +518,6 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // UI: Diálogo de Resultado
   void _showSuggestionResult(String text) {
     showDialog(
       context: context,
@@ -472,13 +535,12 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Text(text, style: const TextStyle(color: Colors.white70, height: 1.5)),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Gracias Chef", style: TextStyle(color: Color(0xFF00FF88)))),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text("Gracias Chef", style: TextStyle(color: Theme.of(context).primaryColor))),
         ],
       ),
     );
   }
 
-  // UI: Diálogo de "Compra el VIP"
   void _showVipLockDialog() {
     showDialog(
       context: context,
@@ -486,8 +548,7 @@ class _DashboardPageState extends State<DashboardPage> {
         backgroundColor: const Color(0xFF1E1E1E),
         title: const Text("Función VIP 👑", style: TextStyle(color: Color(0xFFFFD700))),
         content: const Text(
-          "Solo los donadores tienen acceso al Chef Personal Inteligente.\n\n"
-              "Esta función analiza tus calorías restantes y te dice exactamente qué cenar.",
+          "Solo los donadores tienen acceso al Chef Personal Inteligente.",
           style: TextStyle(color: Colors.grey),
         ),
         actions: [
@@ -495,7 +556,6 @@ class _DashboardPageState extends State<DashboardPage> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              // Redirigir a donación
               Navigator.push(context, MaterialPageRoute(builder: (_) => const DonationPage()));
             },
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700)),
@@ -505,7 +565,6 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
-
 
   // ==========================================
   // GESTIÓN DE COMIDAS (GUARDAR, BORRAR, EDITAR, COMPARTIR)
@@ -523,15 +582,22 @@ class _DashboardPageState extends State<DashboardPage> {
         'timestamp': FieldValue.serverTimestamp(),
         'date_str': DateFormat('yyyy-MM-dd').format(DateTime.now()),
       });
+      // 👇 AQUÍ ES DONDE LLAMAS A LA NUEVA FUNCIÓN DE RACHA 👇
+      await _updateStreak();
+
       await _loadWeeklyStats();
       if (mounted) {
         HapticFeedback.heavyImpact();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Guardado: $name"), backgroundColor: const Color(0xFF00FF88)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("Guardado: $name"),
+            backgroundColor: Theme.of(context).primaryColor
+        ));
       }
     } catch (e) {
       debugPrint("Error guardando: $e");
     }
   }
+
 
   Future<void> _deleteMeal(String docId) async {
     HapticFeedback.mediumImpact();
@@ -539,11 +605,8 @@ class _DashboardPageState extends State<DashboardPage> {
     await _loadWeeklyStats();
   }
 
-
-// 🌍 COMPARTIR COMIDA (ACTUALIZADO CON PRIVACIDAD)
   Future<void> _shareMeal(Map<String, dynamic> data, bool isPrivate) async {
     if (user == null) return;
-
     final userDoc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
     final userData = userDoc.data();
     final userName = userData?['name'] ?? user!.displayName ?? "NutriUsuario";
@@ -560,7 +623,7 @@ class _DashboardPageState extends State<DashboardPage> {
         'carbs': data['carbs'],
         'fat': data['fat'],
         'likes': [],
-        'is_private': isPrivate, // <--- GUARDAMOS SI ES PRIVADO
+        'is_private': isPrivate,
         'timestamp': FieldValue.serverTimestamp(),
       });
 
@@ -569,7 +632,7 @@ class _DashboardPageState extends State<DashboardPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content: Text(isPrivate ? "Publicado solo para amigos 🔒" : "Publicado en el muro global 🌍"),
-              backgroundColor: Theme.of(context).primaryColor // Usar color del tema
+              backgroundColor: Theme.of(context).primaryColor
           ),
         );
       }
@@ -578,7 +641,41 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // ✏️ FUNCIÓN DE EDICIÓN (CON BOTÓN COMPARTIR CORREGIDO)
+  Future<void> _updateUserRecords() async {
+    if (user == null) return;
+
+    final userDoc = FirebaseFirestore.instance.collection('users').doc(user!.uid);
+    final mealsSnapshot = await userDoc.collection('meals').get();
+
+    // 1. Contar escaneos totales
+    int totalScans = mealsSnapshot.docs.length;
+
+    // 2. Calcular racha (días consecutivos con registros)
+    // Obtenemos todos los date_str únicos y los ordenamos
+    List<String> activeDays = mealsSnapshot.docs
+        .map((doc) => doc['date_str'] as String)
+        .toSet()
+        .toList();
+    activeDays.sort((a, b) => b.compareTo(a)); // De más reciente a más antiguo
+
+    int currentStreak = 0;
+    if (activeDays.isNotEmpty) {
+      // Lógica simple de racha: comparamos fechas consecutivas
+      currentStreak = activeDays.length; // Simplificación para el ejemplo
+    }
+
+    // 3. Actualizar insignias basadas en records
+    List<String> newBadges = [];
+    if (totalScans >= 50) newBadges.add('ia_master');
+    if (currentStreak >= 7) newBadges.add('streak_7');
+
+    await userDoc.update({
+      'total_scans': totalScans,
+      'current_streak': currentStreak,
+      'badges': FieldValue.arrayUnion(newBadges), // Añade sin duplicar
+    });
+  }
+
   void _showEditMealDialog(String mealId, Map<String, dynamic> currentData) {
     final nameCtrl = TextEditingController(text: currentData['name']);
     final calCtrl = TextEditingController(text: currentData['calories'].toString());
@@ -616,19 +713,16 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
         ),
         actions: [
-          // 👇👇👇 AQUÍ ESTABA EL ERROR (CORREGIDO) 👇👇👇
           IconButton(
             icon: const Icon(Icons.share, color: Colors.lightBlueAccent),
-            tooltip: "Publicar en Comunidad",
             onPressed: () => _shareMeal({
               'name': nameCtrl.text,
               'calories': int.tryParse(calCtrl.text) ?? 0,
               'protein': int.tryParse(protCtrl.text) ?? 0,
               'carbs': int.tryParse(carbCtrl.text) ?? 0,
               'fat': int.tryParse(fatCtrl.text) ?? 0,
-            }, false), // <--- AGREGADO 'false' (Público) PARA CUMPLIR CON LOS 2 ARGUMENTOS
+            }, false),
           ),
-          // 👆👆👆
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.grey))),
           ElevatedButton(
             onPressed: () async {
@@ -641,7 +735,7 @@ class _DashboardPageState extends State<DashboardPage> {
               });
               if (mounted) {
                 Navigator.pop(context);
-                _loadWeeklyStats(); // Asegúrate de que esta función exista en tu código
+                _loadWeeklyStats();
               }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor),
@@ -672,6 +766,7 @@ class _DashboardPageState extends State<DashboardPage> {
   // ==========================================
 
   Widget _buildHomeView() {
+    final themeColor = Theme.of(context).primaryColor;
     final now = DateTime.now();
     final startOfDay = Timestamp.fromDate(DateTime(now.year, now.month, now.day));
     final endOfDay = Timestamp.fromDate(DateTime(now.year, now.month, now.day, 23, 59, 59));
@@ -685,7 +780,7 @@ class _DashboardPageState extends State<DashboardPage> {
           .where('timestamp', isLessThanOrEqualTo: endOfDay)
           .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Color(0xFF00FF88)));
+        if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: themeColor));
 
         int totalCal = 0, totalProtein = 0, totalCarbs = 0, totalFat = 0;
         final meals = snapshot.data!.docs;
@@ -705,19 +800,16 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // CABECERA CON BOTÓN DE CALENDARIO
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text("Dashboard", style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
                   IconButton(
-                    onPressed: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (context) => const CalendarPage()));
-                    },
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const CalendarPage())),
                     icon: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(color: const Color(0xFF1F1F1F), borderRadius: BorderRadius.circular(12)),
-                      child: const Icon(Icons.calendar_month, color: Color(0xFF00FF88)),
+                      child: Icon(Icons.calendar_month, color: themeColor),
                     ),
                   ),
                 ],
@@ -735,7 +827,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         value: progress.clamp(0.0, 1.0),
                         strokeWidth: 15,
                         backgroundColor: Colors.grey.shade800,
-                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF00FF88)),
+                        valueColor: AlwaysStoppedAnimation<Color>(themeColor),
                       ),
                     ),
                     Column(
@@ -751,28 +843,24 @@ class _DashboardPageState extends State<DashboardPage> {
               const SizedBox(height: 30),
               _buildMacroRow(totalProtein, totalCarbs, totalFat),
 
-              // ⬇️⬇️⬇️ BOTÓN MÁGICO DE SUGERENCIA AQUÍ ⬇️⬇️⬇️
               const SizedBox(height: 20),
               Container(
                 width: double.infinity,
                 margin: const EdgeInsets.symmetric(horizontal: 5),
                 child: ElevatedButton.icon(
-                  onPressed: () => _getDinnerSuggestion(totalCal), // Pasamos las calorías actuales
+                  onPressed: () => _getDinnerSuggestion(totalCal),
                   icon: const Icon(Icons.auto_awesome, color: Colors.black),
                   label: const Text(
                     "¿Qué puedo comer ahora?",
                     style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFFD700), // Dorado VIP
+                    backgroundColor: const Color(0xFFFFD700),
                     padding: const EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                    elevation: 5,
-                    shadowColor: Colors.amber.withOpacity(0.5),
                   ),
                 ),
               ),
-              // ⬆️⬆️⬆️ FIN DEL BOTÓN ⬆️⬆️⬆️
 
               const SizedBox(height: 30),
               _buildMealsSection(meals),
@@ -784,7 +872,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       onPressed: _showManualEntryDialog,
                       icon: const Icon(Icons.edit, color: Colors.black),
                       label: const Text("Agregar", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00FF88), padding: const EdgeInsets.symmetric(vertical: 15), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+                      style: ElevatedButton.styleFrom(backgroundColor: themeColor, padding: const EdgeInsets.symmetric(vertical: 15), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
                     ),
                   ),
                   const SizedBox(width: 15),
@@ -835,6 +923,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildMealItem(String name, int calories, String docId, {int protein = 0, int carbs = 0, int fat = 0}) {
+    final themeColor = Theme.of(context).primaryColor;
     return GestureDetector(
       onTap: () {
         HapticFeedback.selectionClick();
@@ -846,7 +935,7 @@ class _DashboardPageState extends State<DashboardPage> {
         decoration: BoxDecoration(color: const Color(0xFF111111), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
         child: Row(
           children: [
-            Container(padding: const EdgeInsets.all(10), decoration: const BoxDecoration(color: Color(0xFF00FF88), shape: BoxShape.circle), child: const Icon(Icons.edit, color: Colors.black, size: 20)),
+            Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: themeColor, shape: BoxShape.circle), child: const Icon(Icons.edit, color: Colors.black, size: 20)),
             const SizedBox(width: 15),
             Expanded(
               child: Column(
@@ -861,7 +950,7 @@ class _DashboardPageState extends State<DashboardPage> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text("$calories", style: const TextStyle(color: Color(0xFF00FF88), fontSize: 16, fontWeight: FontWeight.bold)),
+                Text("$calories", style: TextStyle(color: themeColor, fontSize: 16, fontWeight: FontWeight.bold)),
                 const Text("kcal", style: TextStyle(color: Colors.grey, fontSize: 10)),
               ],
             ),
@@ -939,7 +1028,7 @@ class _DashboardPageState extends State<DashboardPage> {
         onTap: (index) => setState(() => _selectedIndex = index),
         backgroundColor: const Color(0xFF0A0A0A),
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xFF00FF88),
+        selectedItemColor: Theme.of(context).primaryColor,
         unselectedItemColor: Colors.grey,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: "Inicio"),

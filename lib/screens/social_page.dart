@@ -1,7 +1,11 @@
+import 'dart:math'; // Para la autoreparación de IDs
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+
+// IMPORTAR PARA ACCEDER A LA LISTA DE GORRITOS (allHats)
+import 'profile_page.dart';
 
 class SocialPage extends StatefulWidget {
   const SocialPage({super.key});
@@ -15,7 +19,7 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
   final _emailController = TextEditingController();
   final User? currentUser = FirebaseAuth.instance.currentUser;
 
-  // 🛡️ NUEVO: LISTA LOCAL DE BLOQUEADOS
+  // 🛡️ LISTA LOCAL DE BLOQUEADOS
   List<String> _blockedUserIds = [];
 
   @override
@@ -25,8 +29,9 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
     _tabController.addListener(() {
       setState(() {});
     });
-    // 🛡️ CARGAR BLOQUEADOS AL INICIAR
+
     _loadBlockedUsers();
+    _fixMissingFriendCode(); // Autoreparación de ID
   }
 
   // 🛡️ 1. CARGAR USUARIOS BLOQUEADOS
@@ -49,8 +54,28 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
     }
   }
 
+  // 🛡️ 2. AUTOREPARACIÓN DE ID (Si tu cuenta vieja no tiene ID)
+  Future<void> _fixMissingFriendCode() async {
+    if (currentUser == null) return;
+    final docRef = FirebaseFirestore.instance.collection('users').doc(currentUser!.uid);
+    final docSnap = await docRef.get();
+
+    if (docSnap.exists) {
+      final data = docSnap.data() as Map<String, dynamic>;
+      if (data['friend_code'] == null || data['friend_code'] == "") {
+        final String name = data['name'] ?? "Usuario";
+        final random = Random();
+        final number = 1000 + random.nextInt(9000);
+        final cleanName = name.split(' ')[0].replaceAll(RegExp(r'[^\w\s]+'), '');
+        final newCode = "$cleanName#$number";
+        await docRef.update({'friend_code': newCode});
+        if(mounted) setState(() {});
+      }
+    }
+  }
+
   // ==========================================
-  // LÓGICA DE AMIGOS (TU CÓDIGO ORIGINAL)
+  // LÓGICA DE AMIGOS
   // ==========================================
 
   Future<void> _addFriend() async {
@@ -93,7 +118,6 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
 
   void _showAddFriendDialog() {
     final Color themeColor = Theme.of(context).primaryColor;
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -123,7 +147,7 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
   }
 
   // ==========================================
-  // LÓGICA DEL MURO Y SEGURIDAD
+  // LÓGICA DEL MURO
   // ==========================================
 
   Future<void> _toggleLike(String docId, List likes) async {
@@ -160,9 +184,7 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
     }
   }
 
-  // 🛡️ 2. MENÚ DE OPCIONES (REPORTAR / BLOQUEAR / COPIAR)
   void _showPostOptions(String docId, String postUserId, String postUserName, Map<String, dynamic> mealData) {
-    // Si es mi propio post, solo mostrar opción de borrar (opcional) o nada
     final bool isMe = currentUser!.uid == postUserId;
     final Color themeColor = Theme.of(context).primaryColor;
 
@@ -174,8 +196,6 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(height: 4, width: 40, margin: const EdgeInsets.symmetric(vertical: 10), decoration: BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.circular(2))),
-
-          // OPCIÓN 1: COPIAR (Tu función original)
           ListTile(
             leading: Icon(Icons.add_circle_outline, color: themeColor),
             title: const Text("Copiar a mi dieta", style: TextStyle(color: Colors.white)),
@@ -185,9 +205,7 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
             },
           ),
           const Divider(color: Colors.grey, height: 1),
-
           if (!isMe) ...[
-            // OPCIÓN 2: REPORTAR
             ListTile(
               leading: const Icon(Icons.flag, color: Colors.redAccent),
               title: const Text("Reportar contenido", style: TextStyle(color: Colors.white)),
@@ -196,7 +214,6 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
                 _reportPost(docId, postUserId);
               },
             ),
-            // OPCIÓN 3: BLOQUEAR
             ListTile(
               leading: const Icon(Icons.block, color: Colors.grey),
               title: Text("Bloquear a $postUserName", style: const TextStyle(color: Colors.white)),
@@ -212,7 +229,6 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
     );
   }
 
-  // 🛡️ Lógica de Reporte
   Future<void> _reportPost(String docId, String postUserId) async {
     await FirebaseFirestore.instance.collection('reports').add({
       'post_id': docId,
@@ -224,7 +240,6 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Reporte enviado."), backgroundColor: Colors.green));
   }
 
-  // 🛡️ Lógica de Bloqueo
   Future<void> _blockUser(String blockedUserId) async {
     await FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).collection('blocked_users').doc(blockedUserId).set({
       'blocked_at': FieldValue.serverTimestamp(),
@@ -233,6 +248,40 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
       _blockedUserIds.add(blockedUserId);
     });
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Usuario bloqueado.")));
+  }
+
+  // ==========================================
+  // 🔥 NUEVO WIDGET: AVATAR CON GORRITO 🔥
+  // ==========================================
+  Widget _buildAvatarWithHat(String? photoUrl, String name, String? activeHatId, {double radius = 20, double iconSize = 24}) {
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.topCenter,
+      children: [
+        // 1. El Avatar Base
+        Padding(
+          padding: const EdgeInsets.only(top: 4), // Espacio para el gorro
+          child: CircleAvatar(
+            radius: radius,
+            backgroundColor: Colors.grey[800],
+            backgroundImage: (photoUrl != null && photoUrl.isNotEmpty) ? NetworkImage(photoUrl) : null,
+            child: (photoUrl == null || photoUrl.isEmpty)
+                ? Text(name.isNotEmpty ? name[0].toUpperCase() : "U", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                : null,
+          ),
+        ),
+
+        // 2. El Gorrito (Si existe)
+        if (activeHatId != null && activeHatId.isNotEmpty)
+          Builder(builder: (context) {
+            final hat = allHats.firstWhere((h) => h.id == activeHatId, orElse: () => allHats[0]);
+            return Positioned(
+              top: -5, // Ajuste vertical
+              child: Icon(hat.icon, color: hat.color, size: iconSize),
+            );
+          }),
+      ],
+    );
   }
 
   // ==========================================
@@ -306,7 +355,7 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
   }
 
   // ------------------------------------------
-  // PESTAÑA 1: MURO GLOBAL (MODIFICADA CON SEGURIDAD)
+  // PESTAÑA 1: MURO GLOBAL
   // ------------------------------------------
   Widget _buildFeedTab() {
     final Color themeColor = Theme.of(context).primaryColor;
@@ -326,7 +375,6 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
             if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: themeColor));
             final posts = snapshot.data!.docs;
 
-            // 🛡️ FILTRO: Eliminamos posts de gente bloqueada
             final filteredPosts = posts.where((doc) {
               final d = doc.data() as Map<String, dynamic>;
               return !_blockedUserIds.contains(d['user_id']);
@@ -356,6 +404,12 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
                 final Timestamp? ts = data['timestamp'];
                 final String timeAgo = ts != null ? DateFormat('dd MMM, HH:mm').format(ts.toDate()) : "Reciente";
 
+                // NOTA: Para que aparezcan el gorro y foto en el muro,
+                // debes asegurarte que al guardar el post (Dashboard) también guardes estos campos.
+                // Si son posts antiguos, saldrán sin gorro.
+                final String? postHat = data['active_hat'];
+                final String? postPhoto = data['user_photo'] ?? data['photo_url'];
+
                 return Container(
                   margin: const EdgeInsets.only(bottom: 20),
                   decoration: BoxDecoration(
@@ -371,18 +425,13 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
                   child: Column(
                     children: [
                       ListTile(
-                        leading: Stack(
-                          children: [
-                            CircleAvatar(
-                              backgroundColor: const Color(0xFF333333),
-                              child: Text((data['user_name'] ?? "U")[0].toUpperCase(), style: const TextStyle(color: Colors.white)),
-                            ),
-                            if (isVip)
-                              const Positioned(
-                                right: 0, bottom: 0,
-                                child: Icon(Icons.verified, color: Colors.amber, size: 16),
-                              ),
-                          ],
+                        // 🔥 USAMOS EL NUEVO WIDGET DE AVATAR AQUÍ
+                        leading: _buildAvatarWithHat(
+                            postPhoto,
+                            data['user_name'] ?? "U",
+                            postHat,
+                            radius: 20,
+                            iconSize: 22
                         ),
                         title: Row(
                           children: [
@@ -408,13 +457,11 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
                           ],
                         ),
                         subtitle: Text(isPrivate ? "Solo para amigos • $timeAgo" : timeAgo, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                        // 🛡️ CAMBIO AQUÍ: Menú de 3 puntos en lugar del botón directo de copiar
                         trailing: IconButton(
                           icon: const Icon(Icons.more_vert, color: Colors.grey),
                           onPressed: () => _showPostOptions(doc.id, authorId, data['user_name'], data),
                         ),
                       ),
-
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
                         child: Row(
@@ -428,7 +475,6 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
                           ],
                         ),
                       ),
-
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 0),
                         child: Row(
@@ -453,7 +499,7 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
   }
 
   // ------------------------------------------
-  // PESTAÑA 2: RANKING (SIN CAMBIOS)
+  // PESTAÑA 2: RANKING (ACTUALIZADO CON FOTO Y GORRO)
   // ------------------------------------------
   Widget _buildRankingTab() {
     final Color themeColor = Theme.of(context).primaryColor;
@@ -489,6 +535,10 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
                 final bool isMe = users[index].id == currentUser!.uid;
                 final bool isDonor = userDoc['is_donor'] ?? false;
 
+                // DATOS VISUALES REALES
+                final String? photo = userDoc['photoUrl'] ?? userDoc['photo_url'];
+                final String? hat = userDoc['active_hat'];
+
                 Widget? trailingIcon;
                 if (index == 0) {
                   trailingIcon = const Text("🥇", style: TextStyle(fontSize: 24));
@@ -504,9 +554,13 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
                     side: isDonor ? const BorderSide(color: Colors.amber, width: 1.5) : BorderSide.none,
                   ),
                   child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: Colors.grey[800],
-                      child: Text(name[0].toUpperCase(), style: const TextStyle(color: Colors.white)),
+                    // 🔥 USAMOS EL NUEVO WIDGET DE AVATAR AQUÍ
+                    leading: _buildAvatarWithHat(
+                        photo,
+                        name,
+                        hat,
+                        radius: 20,
+                        iconSize: 22
                     ),
                     title: Row(
                       children: [
@@ -527,7 +581,7 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
   }
 
   // ------------------------------------------
-  // PESTAÑA 3: MIS AMIGOS (SIN CAMBIOS)
+  // PESTAÑA 3: MIS AMIGOS (ACTUALIZADO CON FOTO Y GORRO)
   // ------------------------------------------
   Widget _buildFriendsList() {
     final Color themeColor = Theme.of(context).primaryColor;
@@ -551,8 +605,19 @@ class _SocialPageState extends State<SocialPage> with SingleTickerProviderStateM
                 final d = doc.data() as Map<String, dynamic>;
                 final bool isDonor = d['is_donor'] ?? false;
 
+                // DATOS VISUALES REALES
+                final String? photo = d['photoUrl'] ?? d['photo_url'];
+                final String? hat = d['active_hat'];
+
                 return ListTile(
-                  leading: Icon(Icons.person, color: themeColor),
+                  // 🔥 USAMOS EL NUEVO WIDGET DE AVATAR AQUÍ
+                  leading: _buildAvatarWithHat(
+                      photo,
+                      d['name'] ?? "U",
+                      hat,
+                      radius: 22,
+                      iconSize: 24
+                  ),
                   title: Row(
                     children: [
                       Text(d['name'] ?? "Usuario", style: const TextStyle(color: Colors.white)),

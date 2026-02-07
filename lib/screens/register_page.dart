@@ -1,7 +1,8 @@
+import 'dart:math'; // 1. IMPORTANTE: Agrega esto al inicio
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dashboard_page.dart'; // Asegúrate de tener este archivo para navegar al final
+import 'dashboard_page.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -11,7 +12,6 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
-  // Controladores de texto para los campos
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -21,14 +21,25 @@ class _RegisterPageState extends State<RegisterPage> {
 
   bool _isLoading = false;
 
+  // 2. NUEVA FUNCIÓN: Generar código único (Ej: David#4521)
+  String _generateFriendCode(String name) {
+    final random = Random();
+    final number = 1000 + random.nextInt(9000); // Número entre 1000 y 9999
+    // Tomamos la primera palabra del nombre y quitamos símbolos raros
+    final cleanName = name.split(' ')[0].replaceAll(RegExp(r'[^\w\s]+'), '');
+    return "$cleanName#$number";
+  }
+
   Future<void> _register() async {
-    // 1. Validaciones simples
-    if (_nameController.text.isEmpty ||
-        _emailController.text.isEmpty ||
-        _passwordController.text.isEmpty ||
-        _ageController.text.isEmpty ||
-        _weightController.text.isEmpty ||
-        _heightController.text.isEmpty) {
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+    final ageText = _ageController.text.trim();
+    final weightText = _weightController.text.trim();
+    final heightText = _heightController.text.trim();
+
+    if (name.isEmpty || email.isEmpty || password.isEmpty ||
+        ageText.isEmpty || weightText.isEmpty || heightText.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Por favor, llena todos los campos.")),
       );
@@ -38,32 +49,35 @@ class _RegisterPageState extends State<RegisterPage> {
     setState(() => _isLoading = true);
 
     try {
-      // 2. Crear usuario en Firebase Authentication (Correo y Contraseña)
       UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+        email: email,
+        password: password,
       );
 
-      // 3. Guardar datos físicos y configuración en Firestore (Base de Datos)
-      // AQUÍ ES DONDE OCURRE LA MAGIA PARA EVITAR EL ERROR DEL PLAN GRATUITO
+      // 3. GENERAMOS EL ID ANTES DE GUARDAR
+      final String myFriendCode = _generateFriendCode(name);
+
       await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
         'uid': userCredential.user!.uid,
-        'name': _nameController.text.trim(),
-        'email': _emailController.text.trim(),
+        'name': name,
+        'email': email,
+        'friend_code': myFriendCode, // ✅ AQUÍ GUARDAMOS LA ID
+        'photoUrl': "",
+        'active_hat': null,
 
-        // Datos Físicos (Convertimos texto a número)
-        'age': int.tryParse(_ageController.text.trim()) ?? 0,
-        'weight': double.tryParse(_weightController.text.trim()) ?? 0.0,
-        'height': double.tryParse(_heightController.text.trim()) ?? 0.0,
+        'age': int.tryParse(ageText) ?? 0,
+        'weight': double.tryParse(weightText) ?? 0.0,
+        'height': double.tryParse(heightText) ?? 0.0,
 
-        // --- CONFIGURACIÓN POR DEFECTO (CRUCIAL) ---
-        'is_donor': false,    // Nace como usuario GRATIS
-        'social_score': 0,    // Puntos iniciales
+        'is_donor': false,
+        'social_score': 0,
+        'is_beta_user': true,
+        'badges': ['beta_founder'],
+        'current_streak': 0,
+        'total_scans': 0,
         'created_at': FieldValue.serverTimestamp(),
-        // --------------------------------------------
       });
 
-      // 4. Si todo salió bien, vamos al Dashboard
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const DashboardPage()),
@@ -74,14 +88,15 @@ class _RegisterPageState extends State<RegisterPage> {
     } on FirebaseAuthException catch (e) {
       String msg = "Error al registrarse";
       if (e.code == 'email-already-in-use') msg = "Este correo ya está registrado.";
-      if (e.code == 'weak-password') msg = "La contraseña es muy débil (mínimo 6 caracteres).";
+      if (e.code == 'invalid-email') msg = "El formato del correo es incorrecto.";
+      if (e.code == 'weak-password') msg = "La contraseña debe tener al menos 6 caracteres.";
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: Colors.redAccent),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.redAccent),
+        SnackBar(content: Text("Error inesperado: $e"), backgroundColor: Colors.redAccent),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -90,6 +105,8 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
+    // ... TU CÓDIGO UI EXISTENTE (NO CAMBIA) ...
+    // Solo asegúrate de copiar el build completo que ya tenías
     return Scaffold(
       backgroundColor: const Color(0xFF050505),
       appBar: AppBar(
@@ -104,25 +121,14 @@ class _RegisterPageState extends State<RegisterPage> {
             children: [
               const Icon(Icons.person_add, size: 80, color: Color(0xFF00FF88)),
               const SizedBox(height: 20),
-              const Text(
-                "Únete a Nutri_IA",
-                style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-              ),
+              const Text("Únete a Nutri_IA", style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
               const SizedBox(height: 30),
-
-              // CAMPO NOMBRE
               _buildTextField(_nameController, "Nombre completo", Icons.person),
               const SizedBox(height: 15),
-
-              // CAMPO CORREO
               _buildTextField(_emailController, "Correo electrónico", Icons.email, isEmail: true),
               const SizedBox(height: 15),
-
-              // CAMPO CONTRASEÑA
               _buildTextField(_passwordController, "Contraseña", Icons.lock, isPassword: true),
               const SizedBox(height: 15),
-
-              // FILA: EDAD, PESO, ALTURA
               Row(
                 children: [
                   Expanded(child: _buildTextField(_ageController, "Edad", Icons.cake, isNumber: true)),
@@ -132,10 +138,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   Expanded(child: _buildTextField(_heightController, "Altura (cm)", Icons.height, isNumber: true)),
                 ],
               ),
-
               const SizedBox(height: 40),
-
-              // BOTÓN REGISTRAR
               _isLoading
                   ? const CircularProgressIndicator(color: Color(0xFF00FF88))
                   : SizedBox(
@@ -158,7 +161,6 @@ class _RegisterPageState extends State<RegisterPage> {
     );
   }
 
-  // Widget auxiliar para no repetir código de inputs
   Widget _buildTextField(TextEditingController controller, String hint, IconData icon,
       {bool isPassword = false, bool isNumber = false, bool isEmail = false}) {
     return TextField(
