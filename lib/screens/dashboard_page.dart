@@ -42,7 +42,7 @@ class _DashboardPageState extends State<DashboardPage> {
     super.initState();
     // ✅ MODELO CORRECTO CON SDK
     _model = GenerativeModel(
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-flash-preview', // TIENES PROHINIDO MODIFCAR ESTE MODELO NO TOCAR EN NINGUN ARCHIVO QUE USE IA
       apiKey: ApiConfig.geminiApiKey,
       generationConfig: GenerationConfig(responseMimeType: 'application/json'),
     );
@@ -181,6 +181,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }) async {
     if (user == null) return;
     try {
+      // 1. Guardar la comida (ESTO YA LO TIENES)
       await FirebaseFirestore.instance.collection('users').doc(user!.uid).collection('meals').add({
         'name': name,
         'calories': calories,
@@ -193,11 +194,26 @@ class _DashboardPageState extends State<DashboardPage> {
         'timestamp': FieldValue.serverTimestamp(),
         'date_str': DateFormat('yyyy-MM-dd').format(DateTime.now()),
       });
-      await _updateStreak();
-      await _loadWeeklyStats();
+
+      // ✅ NUEVO: ACTUALIZAR PUNTOS Y ESTADÍSTICAS DEL USUARIO
+      await FirebaseFirestore.instance.collection('users').doc(user!.uid).update({
+        'social_score': FieldValue.increment(10), // +10 puntos para el Ranking
+        'total_scans': FieldValue.increment(1),   // Para desbloquear logros futuros
+        'last_active': FieldValue.serverTimestamp(),
+      });
+
+      await _updateStreak(); // (ESTO YA LO TIENES)
+      await _loadWeeklyStats(); // (ESTO YA LO TIENES)
+
       if (mounted) {
         HapticFeedback.heavyImpact();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Guardado: $name"), backgroundColor: Theme.of(context).primaryColor));
+        // Feedback visual de puntos ganados
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: const Text("¡Guardado! +10 Puntos Social Score 🏆"),
+                backgroundColor: Theme.of(context).primaryColor
+            )
+        );
       }
     } catch (e) {
       debugPrint("Error guardando: $e");

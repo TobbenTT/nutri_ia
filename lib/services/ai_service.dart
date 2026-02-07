@@ -3,33 +3,31 @@ import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 class AiService {
-  // 🔴 🔴 🔴 ¡ATENCIÓN! PEGA TU API KEY AQUÍ ABAJO DENTRO DE LAS COMILLAS 🔴 🔴 🔴
+  // 🔴 🔴 🔴 API KEY SEGURA 🔴 🔴 🔴
   static const String apiKey = 'AIzaSyCUVCeImhIuKSq5e3uC-oPwBbULvU3WXjU';
 
   Future<Map<String, dynamic>?> analyzeFood(File imageFile) async {
     try {
-      // Usamos el modelo Gemini 1.5 Flash (Rápido y bueno para imágenes)
+      // ✅ MODELO CORRECTO: gemini-3-flash-preview
       final model = GenerativeModel(
-        model: 'gemini-pro-vision', // El modelo clásico para fotos
+        model: 'gemini-3-flash-preview',
         apiKey: apiKey,
       );
 
       final imageBytes = await imageFile.readAsBytes();
 
-      // Le damos instrucciones precisas a la IA para que actúe como nutricionista
+      // Prompt pidiendo JSON estricto
       final prompt = TextPart(
           "Analiza esta imagen de comida. Identifica el plato principal. "
               "Devuelve SOLO un JSON (sin texto extra ni markdown ```json) con este formato exacto: "
-              "{'name': 'Nombre corto del plato', 'calories': 0 (número entero estimado), 'protein': 0.0 (decimal estimado), 'carbs': 0.0 (decimal estimado), 'fat': 0.0 (decimal estimado)}. "
+              "{'name': 'Nombre corto del plato', 'calories': 0 (número entero estimado), 'protein': 0 (número entero estimado), 'carbs': 0 (número entero estimado), 'fat': 0 (número entero estimado)}. "
               "Si la imagen no es comida clara, devuelve un JSON vacío {}."
       );
 
-      // Preparamos la imagen para enviarla
       final imageParts = [
         DataPart('image/jpeg', imageBytes),
       ];
 
-      // Enviamos todo a Google
       final response = await model.generateContent([
         Content.multi([prompt, ...imageParts])
       ]);
@@ -41,22 +39,29 @@ class AiService {
         return null;
       }
 
-      // Limpieza de seguridad por si la IA agrega formato de código
-      String cleanJson = text.replaceAll('```json', '').replaceAll('```', '').trim();
+      // ✅ EXTRACCIÓN SEGURA DE JSON CON REGEX
+      // Busca contenido entre { y } para evitar errores de formato
+      final jsonMatch = RegExp(r'\{.*\}', dotAll: true).firstMatch(text);
 
-      // Convertimos el texto recibido en datos que la app entiende (Mapa)
-      return jsonDecode(cleanJson);
+      if (jsonMatch != null) {
+        String cleanJson = jsonMatch.group(0)!;
+        return jsonDecode(cleanJson);
+      } else {
+        // Fallback por si la IA no obedece
+        String cleanJson = text.replaceAll('```json', '').replaceAll('```', '').trim();
+        return jsonDecode(cleanJson);
+      }
 
     } catch (e) {
-      print("Error grave en el servicio de IA: $e");
+      print("Error en AiService: $e");
       return null;
     }
   }
 
-  // NUEVA FUNCIÓN: GENERADOR DE DIETA
+  // ✅ MODELO CORRECTO: gemini-3-flash-preview
   Future<String?> generateDietPlan(int calories, String goal) async {
     try {
-      final model = GenerativeModel(model: 'gemini-1.5-flash-001', apiKey: apiKey);
+      final model = GenerativeModel(model: 'gemini-3-flash-preview', apiKey: apiKey);
 
       final prompt = "Soy tu nutricionista IA. Mi paciente necesita consumir $calories kcal diarias. "
           "Su objetivo actual es: $goal. "
@@ -70,6 +75,4 @@ class AiService {
       return "Error al generar dieta: $e";
     }
   }
-} // Fin de la clase
-
-
+}

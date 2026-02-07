@@ -12,6 +12,7 @@ import 'edit_profile_page.dart';
 import 'terms_page.dart';
 import 'appearance_page.dart';
 import 'profile_page.dart'; // IMPORTANTE: Aquí está la lista allHats
+import 'feedback_page.dart';
 
 // =======================================================
 // SETTINGS PAGE - PRINCIPAL
@@ -817,6 +818,21 @@ class _PrivacyPageState extends State<PrivacyPage> {
             onChanged: (val) async {
               setState(() => _isPrivate = val);
               await FirebaseFirestore.instance.collection('users').doc(user!.uid).update({'is_private_profile': val});
+            },
+          ),
+          const Divider(color: Colors.grey), // Un separador se ve bien
+
+          // ✅ NUEVO BOTÓN DE FEEDBACK
+          ListTile(
+            leading: const Icon(Icons.bug_report, color: Color(0xFF00FF88)),
+            title: const Text("Reportar Error o Sugerencia", style: TextStyle(color: Colors.white)),
+            subtitle: const Text("Ayúdanos a mejorar la app", style: TextStyle(color: Colors.grey)),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+            onTap: () {
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const FeedbackPage())
+              );
             },
           ),
           const Divider(color: Colors.grey),

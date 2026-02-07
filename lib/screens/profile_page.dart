@@ -1,26 +1,46 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart'; // Para HapticFeedback
 import 'login_page.dart';
 
 // ------------------------------------------------------------------------
-// MODELO DE ACCESORIOS (GORRITOS)
+// 1. MODELO DE ACCESORIOS (GORRITOS) - VERSIÓN FINAL
 // ------------------------------------------------------------------------
 class Accessory {
   final String id;
   final String name;
   final IconData icon;
   final Color color;
-  Accessory({required this.id, required this.name, required this.icon, required this.color});
+  final bool needsAd; // Requiere ver anuncio
+  final bool isBeta;  // Exclusivo Beta Founders
+
+  Accessory({
+    required this.id,
+    required this.name,
+    required this.icon,
+    required this.color,
+    this.needsAd = false,
+    this.isBeta = false,
+  });
 }
 
+// 🧢 LISTA MAESTRA DE ACCESORIOS
 final List<Accessory> allHats = [
-  Accessory(id: 'crown', name: 'Rey/Reina', icon: Icons.workspace_premium, color: const Color(0xFFFFD700)), // Oro
-  Accessory(id: 'chef_hat', name: 'Chef Supremo', icon: Icons.restaurant, color: Colors.white70),
-  Accessory(id: 'party_horn', name: 'Fiesta', icon: Icons.celebration, color: Colors.pinkAccent),
-  Accessory(id: 'wizard_hat', name: 'Mago', icon: Icons.auto_awesome, color: Colors.deepPurpleAccent),
-  Accessory(id: 'angel', name: 'Angelito', icon: Icons.wb_sunny_outlined, color: Colors.lightBlueAccent),
+  // --- GRATIS / POR JUGAR ---
+  Accessory(id: 'chef_hat', name: 'Chef', icon: Icons.restaurant, color: Colors.white),
+  Accessory(id: 'party_horn', name: 'Fiestero', icon: Icons.celebration, color: Colors.pinkAccent),
   Accessory(id: 'viking', name: 'Vikingo', icon: Icons.shield, color: Colors.orangeAccent),
+
+  // --- EXCLUSIVOS BETA FOUNDER (LEGENDARIOS) ---
+  Accessory(id: 'beta_helmet', name: 'Casco Beta', icon: Icons.construction, color: Colors.cyanAccent, isBeta: true),
+  Accessory(id: 'bug_hunter', name: 'Caza Bugs', icon: Icons.bug_report, color: Colors.greenAccent, isBeta: true),
+  Accessory(id: 'pioneer', name: 'Pionero', icon: Icons.rocket_launch, color: Colors.purpleAccent, isBeta: true),
+
+  // --- REWARDED ADS (MONETIZACIÓN) ---
+  Accessory(id: 'wizard_hat', name: 'Mago', icon: Icons.auto_awesome, color: Colors.deepPurpleAccent, needsAd: true),
+  Accessory(id: 'angel', name: 'Ángel', icon: Icons.wb_sunny_outlined, color: Colors.lightBlueAccent, needsAd: true),
+  Accessory(id: 'crown', name: 'Rey', icon: Icons.workspace_premium, color: const Color(0xFFFFD700), needsAd: true),
 ];
 
 class ProfilePage extends StatefulWidget {
@@ -33,13 +53,14 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   final User? user = FirebaseAuth.instance.currentUser;
 
-  // Controladores de texto
+  // Controladores
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _goalController = TextEditingController();
   final TextEditingController _photoController = TextEditingController();
 
   bool _isDonor = false;
   bool _isLoading = true;
+  String _previewPhoto = ""; // Para ver la foto en tiempo real antes de guardar
 
   @override
   void initState() {
@@ -47,7 +68,7 @@ class _ProfilePageState extends State<ProfilePage> {
     _loadUserProfile();
   }
 
-  // 📥 CARGAR DATOS DE FIREBASE
+  // 📥 CARGAR DATOS
   Future<void> _loadUserProfile() async {
     if (user == null) return;
     try {
@@ -57,8 +78,8 @@ class _ProfilePageState extends State<ProfilePage> {
         setState(() {
           _nameController.text = data['name'] ?? "Usuario";
           _goalController.text = (data['daily_goal'] ?? 2000).toString();
-          // Usamos photoUrl exacto de tu Firebase para evitar errores
           _photoController.text = data['photoUrl'] ?? "";
+          _previewPhoto = data['photoUrl'] ?? "";
           _isDonor = data['is_donor'] ?? false;
           _isLoading = false;
         });
@@ -69,9 +90,10 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  // 💾 GUARDAR CAMBIOS
+  // 💾 GUARDAR DATOS
   Future<void> _saveProfile() async {
     if (user == null) return;
+    HapticFeedback.mediumImpact();
 
     int newGoal = int.tryParse(_goalController.text) ?? 2000;
     if (newGoal < 500) newGoal = 500;
@@ -86,7 +108,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Perfil actualizado ✅"), backgroundColor: Color(0xFF00FF88)),
+          const SnackBar(content: Text("¡Perfil actualizado correctamente! ✅"), backgroundColor: Color(0xFF00FF88)),
         );
       }
     } catch (e) {
@@ -106,6 +128,44 @@ class _ProfilePageState extends State<ProfilePage> {
             (route) => false,
       );
     }
+  }
+
+  // ------------------------------------------------------------------------
+  // LÓGICA DE ANUNCIOS Y EQUIPAMIENTO
+  // ------------------------------------------------------------------------
+  void _watchAdToUnlock(Accessory hat) {
+    // AQUÍ IRÁ EL CÓDIGO REAL DE ADMOB CUANDO LO INTEGRES
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text("🎁 Desbloquear con Anuncio", style: TextStyle(color: Colors.white)),
+        content: Text("Mira un anuncio breve para usar el gorro '${hat.name}'.\n(Simulación)", style: const TextStyle(color: Colors.grey)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.red))),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // Simulación de espera
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Reproduciendo anuncio... 📺"), duration: Duration(seconds: 2)));
+              Future.delayed(const Duration(seconds: 2), () {
+                _equipHat(hat.id); // ÉXITO
+              });
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00FF88)),
+            child: const Text("VER ANUNCIO", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _equipHat(String hatId) async {
+    await FirebaseFirestore.instance.collection('users').doc(user!.uid).update({
+      'active_hat': hatId,
+    });
+    HapticFeedback.lightImpact();
+    if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("¡Accesorio equipado! 🧢")));
   }
 
   // ------------------------------------------------------------------------
@@ -134,39 +194,46 @@ class _ProfilePageState extends State<ProfilePage> {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            // 1. AVATAR Y ESTADO CON SISTEMA DE GORRITOS
-            const SizedBox(height: 20),
+            // 1. AVATAR CON GORRITO (ZONA VISUAL PRINCIPAL)
+            const SizedBox(height: 10),
             Stack(
               alignment: Alignment.topCenter,
               children: [
+                // Círculo del Avatar
                 Padding(
-                  padding: const EdgeInsets.only(top: 20),
+                  padding: const EdgeInsets.only(top: 25),
                   child: Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                          color: _isDonor ? const Color(0xFFFFD700) : const Color(0xFF00FF88),
-                          width: 3),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: _isDonor ? const Color(0xFFFFD700) : const Color(0xFF00FF88),
+                            width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                              color: (_isDonor ? const Color(0xFFFFD700) : const Color(0xFF00FF88)).withOpacity(0.3),
+                              blurRadius: 20,
+                              spreadRadius: 2
+                          )
+                        ]
                     ),
                     child: CircleAvatar(
-                      radius: 50,
+                      radius: 60,
                       backgroundColor: const Color(0xFF1E1E1E),
-                      // Lógica de seguridad para evitar pantallas rojas si la URL está vacía
-                      backgroundImage: _photoController.text.trim().isNotEmpty
-                          ? NetworkImage(_photoController.text.trim())
+                      backgroundImage: _previewPhoto.isNotEmpty
+                          ? NetworkImage(_previewPhoto)
                           : null,
-                      child: _photoController.text.trim().isEmpty
+                      child: _previewPhoto.isEmpty
                           ? Text(
                         displayName[0].toUpperCase(),
-                        style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white),
+                        style: const TextStyle(fontSize: 50, fontWeight: FontWeight.bold, color: Colors.white),
                       )
                           : null,
                     ),
                   ),
                 ),
 
-                // GORRITO VISUALIZADO EN TIEMPO REAL
+                // GORRITO SUPERPUESTO (STREAM)
                 StreamBuilder<DocumentSnapshot>(
                   stream: FirebaseFirestore.instance.collection('users').doc(user!.uid).snapshots(),
                   builder: (context, snap) {
@@ -180,7 +247,9 @@ class _ProfilePageState extends State<ProfilePage> {
 
                     return Positioned(
                       top: 0,
-                      child: Icon(hat.icon, color: hat.color, size: 45),
+                      child: DropShadow( // Efecto de sombra para el icono
+                        child: Icon(hat.icon, color: hat.color, size: 60),
+                      ),
                     );
                   },
                 ),
@@ -193,34 +262,35 @@ class _ProfilePageState extends State<ProfilePage> {
               style: TextStyle(
                   color: _isDonor ? const Color(0xFFFFD700) : Colors.grey,
                   fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5),
+                  letterSpacing: 1.5,
+                  fontSize: 12),
             ),
 
             const SizedBox(height: 30),
 
-            // 🏆 SECCIÓN DINÁMICA DE RECOMPENSAS (RACHAS Y MEDALLAS)
-            _buildRewardsAndBadgesSection(),
+            // 🏆 SECCIÓN DE ESTADÍSTICAS Y GORRITOS
+            _buildStatsAndHatsSection(),
 
             const SizedBox(height: 30),
-
-            // 2. FORMULARIO DE EDICIÓN
-            _buildTextField("Nombre", _nameController, Icons.person_outline),
+            const Divider(color: Colors.white10),
             const SizedBox(height: 20),
 
+            // 2. FORMULARIO DE DATOS
+            const Align(alignment: Alignment.centerLeft, child: Text("EDITAR PERFIL", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18))),
+            const SizedBox(height: 20),
+
+            _buildTextField("Nombre de Usuario", _nameController, Icons.person_outline),
+            const SizedBox(height: 20),
+
+            // CAMPO DE FOTO CON BOTÓN DE AYUDA (RECUPERADO)
             _buildPhotoUrlField(),
 
             const SizedBox(height: 20),
-            _buildTextField("Meta de Calorías Diaria", _goalController, Icons.flag_outlined, isNumber: true),
-
-            const SizedBox(height: 10),
-            const Text(
-              "Esta meta actualizará tu barra de progreso en el Dashboard.",
-              style: TextStyle(color: Colors.grey, fontSize: 12),
-            ),
+            _buildTextField("Meta Diaria (kcal)", _goalController, Icons.flag_outlined, isNumber: true),
 
             const SizedBox(height: 40),
 
-            // 3. BOTÓN GUARDAR
+            // 3. BOTÓN GUARDAR GRANDE
             SizedBox(
               width: double.infinity,
               height: 55,
@@ -245,162 +315,181 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // --- WIDGETS DE APOYO ---
+  // --- WIDGETS AUXILIARES ---
 
-  Widget _buildRewardsAndBadgesSection() {
+  Widget _buildStatsAndHatsSection() {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(user!.uid).snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const SizedBox();
         final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
-        final List<dynamic> badges = data['badges'] ?? [];
+
         final int streak = data['current_streak'] ?? 0;
+        final int totalScans = data['total_scans'] ?? 0;
 
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Widget de la racha (El fuego)
-            Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.orange.withOpacity(0.5)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.local_fire_department, color: Colors.orange, size: 24),
-                    const SizedBox(width: 8),
-                    Text(
-                      "$streak DÍAS SEGUIDOS",
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                  ],
-                ),
-              ),
+            // Tarjetas de Stats
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _statCard(Icons.local_fire_department, "$streak", "Días Racha", Colors.orange),
+                _statCard(Icons.qr_code_scanner, "$totalScans", "Total Scans", Colors.blueAccent),
+                _statCard(Icons.emoji_events, "${allHats.length}", "Coleccionables", Colors.purpleAccent),
+              ],
             ),
-
             const SizedBox(height: 30),
 
-            // Mostrar Medallas
-            if (badges.isNotEmpty) ...[
-              const Text("MEDALLAS Y LOGROS",
-                  style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-              const SizedBox(height: 15),
-              Wrap(
-                spacing: 20,
-                runSpacing: 20,
-                children: badges.map((b) => _buildBadgeIcon(b.toString())).toList(),
-              ),
-              const SizedBox(height: 30),
-            ],
-
-            // Selector de Accesorios (Gorritos)
-            _buildHatsSelector(data['active_hat'], badges),
+            // Selector de Gorros
+            _buildHatsSelector(data, streak, totalScans),
           ],
         );
       },
     );
   }
 
-  Widget _buildBadgeIcon(String badgeId) {
-    IconData icon; Color color; String label;
-    switch (badgeId) {
-      case 'beta_founder':
-        icon = Icons.verified; color = Colors.cyanAccent; label = "Fundador";
-        break;
-      case 'ia_master':
-        icon = Icons.psychology; color = Colors.purpleAccent; label = "IA Master";
-        break;
-      case 'streak_7':
-        icon = Icons.local_fire_department; color = Colors.orangeAccent; label = "Racha 7";
-        break;
-      default:
-        icon = Icons.star; color = Colors.amber; label = "Logro";
-    }
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            shape: BoxShape.circle,
-            border: Border.all(color: color.withOpacity(0.5), width: 2),
-          ),
-          child: Icon(icon, color: color, size: 30),
-        ),
-        const SizedBox(height: 6),
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
-      ],
+  Widget _statCard(IconData icon, String value, String label, Color color) {
+    return Container(
+      width: 100,
+      padding: const EdgeInsets.symmetric(vertical: 15),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1F1F1F),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: 8),
+          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+          Text(label, style: TextStyle(color: Colors.grey.shade400, fontSize: 10)),
+        ],
+      ),
     );
   }
 
-  Widget _buildHatsSelector(String? activeHatId, List<dynamic> badges) {
-    bool isBeta = badges.contains('beta_founder');
-    // Solo mostramos si es Donador o Fundador
-    if (!_isDonor && !isBeta) return const SizedBox();
+  // LÓGICA DE GORRITOS (BETA / ADS / FREE)
+  Widget _buildHatsSelector(Map<String, dynamic> userData, int streak, int totalScans) {
+    final String? activeHatId = userData['active_hat'];
+    final bool isVip = userData['is_donor'] ?? false;
+    final List<dynamic> badges = userData['badges'] ?? [];
+    final bool isBetaFounder = badges.contains('beta_founder');
+
+    // Reglas de negocio
+    bool isUnlocked(Accessory hat) {
+      if (hat.isBeta) return isBetaFounder; // Solo fundadores
+      if (isVip && !hat.needsAd) return true; // VIP tiene todo lo que no es de anuncio ni beta
+
+      if (hat.needsAd) return false; // Requiere anuncio
+
+      // Reglas Gratis
+      switch (hat.id) {
+        case 'chef_hat': return true;
+        case 'party_horn': return streak >= 3;
+        case 'viking': return totalScans >= 10;
+        default: return false;
+      }
+    }
+
+    String getLockReason(Accessory hat) {
+      if (hat.isBeta) return "Exclusivo Beta Founders 🚀";
+      if (hat.needsAd) return "Ver anuncio para desbloquear 📺";
+      switch (hat.id) {
+        case 'party_horn': return "Necesitas racha de 3 días";
+        case 'viking': return "Necesitas 10 scans";
+        default: return "Bloqueado";
+      }
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          "ACCESORIOS DESBLOQUEADOS",
-          style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 5),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text("TU COLECCIÓN", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+              Icon(Icons.arrow_forward, color: Colors.grey, size: 14)
+            ],
+          ),
         ),
         const SizedBox(height: 15),
         SizedBox(
-          height: 110, // Un poco más alto para que respire el diseño
+          height: 125,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
             itemCount: allHats.length,
             itemBuilder: (context, index) {
               final hat = allHats[index];
+              final bool unlocked = isUnlocked(hat);
               final bool isSelected = activeHatId == hat.id;
-
-              // Filtro de seguridad para el gorrito de Dino
-              if (hat.id == 'dino' && !isBeta) return const SizedBox.shrink();
 
               return GestureDetector(
                 onTap: () async {
-                  await FirebaseFirestore.instance.collection('users').doc(user!.uid).update({
-                    'active_hat': hat.id,
-                  });
+                  if (unlocked) {
+                    _equipHat(hat.id);
+                  } else if (hat.needsAd && !hat.isBeta) {
+                    _watchAdToUnlock(hat);
+                  } else {
+                    _showLockedReason(hat.name, getLockReason(hat));
+                  }
                 },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
-                  width: 90,
+                  width: 95,
                   margin: const EdgeInsets.only(right: 12, bottom: 5, top: 5),
                   decoration: BoxDecoration(
-                    // Fondo oscuro o con tinte del color si está seleccionado
-                    color: isSelected ? hat.color.withAlpha(25) : const Color(0xFF151515),
-                    borderRadius: BorderRadius.circular(22),
+                    color: isSelected ? hat.color.withAlpha(30) : const Color(0xFF151515),
+                    borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: isSelected ? hat.color : Colors.white.withAlpha(15),
-                      width: 2,
+                      color: isSelected
+                          ? hat.color
+                          : (unlocked ? Colors.white10 : Colors.redAccent.withOpacity(0.3)),
+                      width: isSelected ? 2 : 1,
                     ),
-                    boxShadow: isSelected
-                        ? [BoxShadow(color: hat.color.withAlpha(50), blurRadius: 10, spreadRadius: 1)]
-                        : [],
                   ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  child: Stack(
+                    alignment: Alignment.center,
                     children: [
-                      Icon(
-                          hat.icon,
-                          color: isSelected ? hat.color : Colors.grey.shade700,
-                          size: 32
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                              hat.icon,
+                              color: unlocked
+                                  ? (isSelected ? hat.color : Colors.grey.shade700)
+                                  : (hat.isBeta ? Colors.cyan.withOpacity(0.2) : Colors.grey.withOpacity(0.1)),
+                              size: 34
+                          ),
+                          const SizedBox(height: 10),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 5),
+                            child: Text(
+                              hat.name,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: unlocked ? (isSelected ? Colors.white : Colors.grey.shade600) : Colors.grey.shade800,
+                                fontSize: 10,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        hat.name,
-                        style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.grey.shade600,
-                          fontSize: 10,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
+                      // INDICADORES DE ESTADO
+                      if (hat.isBeta && !unlocked)
+                        const Positioned(top: 8, right: 8, child: Icon(Icons.rocket_launch, size: 12, color: Colors.cyanAccent))
+                      else if (!unlocked && hat.needsAd)
+                        const Positioned(top: 8, right: 8, child: Icon(Icons.play_circle_fill, size: 14, color: Colors.amber))
+                      else if (!unlocked)
+                          const Positioned(top: 8, right: 8, child: Icon(Icons.lock, size: 12, color: Colors.redAccent)),
+
+                      if (isSelected)
+                        Positioned(bottom: 8, child: Icon(Icons.check_circle, size: 14, color: hat.color)),
                     ],
                   ),
                 ),
@@ -409,12 +498,32 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ),
         if (activeHatId != null)
-          TextButton.icon(
-            onPressed: () => FirebaseFirestore.instance.collection('users').doc(user!.uid).update({'active_hat': FieldValue.delete()}),
-            icon: const Icon(Icons.close, size: 14, color: Colors.redAccent),
-            label: const Text("Quitar accesorio", style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+          Center(
+            child: TextButton.icon(
+              onPressed: () => FirebaseFirestore.instance.collection('users').doc(user!.uid).update({'active_hat': FieldValue.delete()}),
+              icon: const Icon(Icons.close, size: 14, color: Colors.redAccent),
+              label: const Text("Quitar accesorio", style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+            ),
           ),
       ],
+    );
+  }
+
+  void _showLockedReason(String item, String reason) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.lock, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(child: Text("$item: $reason")),
+            ],
+          ),
+          backgroundColor: Colors.redAccent.withOpacity(0.9),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        )
     );
   }
 
@@ -422,12 +531,13 @@ class _ProfilePageState extends State<ProfilePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         Container(
           decoration: BoxDecoration(
-            color: const Color(0xFF1F1F1F),
-            borderRadius: BorderRadius.circular(15),
+              color: const Color(0xFF1F1F1F),
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: Colors.white10)
           ),
           child: TextField(
             controller: controller,
@@ -444,6 +554,7 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  // 🔥 RECUPERADO: CAMPO DE URL CON BOTÓN DE AYUDA
   Widget _buildPhotoUrlField() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -451,14 +562,14 @@ class _ProfilePageState extends State<ProfilePage> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text("Foto de Perfil (URL)", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            const Text("Foto de Perfil (URL)", style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
             GestureDetector(
-              onTap: _showPhotoTutorial,
+              onTap: _showInstructionsDialog, // 💡 ABRE EL TUTORIAL
               child: const Row(
                 children: [
-                  Icon(Icons.help_outline, color: Color(0xFF00FF88), size: 16),
-                  SizedBox(width: 4),
-                  Text("¿Cómo subir?", style: TextStyle(color: Color(0xFF00FF88), fontSize: 12)),
+                  Icon(Icons.help_outline, color: Color(0xFF00FF88), size: 14),
+                  SizedBox(width: 5),
+                  Text("¿Cómo obtener?", style: TextStyle(color: Color(0xFF00FF88), fontSize: 12)),
                 ],
               ),
             ),
@@ -467,8 +578,9 @@ class _ProfilePageState extends State<ProfilePage> {
         const SizedBox(height: 8),
         Container(
           decoration: BoxDecoration(
-            color: const Color(0xFF1F1F1F),
-            borderRadius: BorderRadius.circular(15),
+              color: const Color(0xFF1F1F1F),
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: Colors.white10)
           ),
           child: TextField(
             controller: _photoController,
@@ -477,41 +589,44 @@ class _ProfilePageState extends State<ProfilePage> {
               prefixIcon: Icon(Icons.link, color: Colors.grey),
               border: InputBorder.none,
               contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-              hintText: "Ej: https://i.imgur.com/foto.jpg",
+              hintText: "Pega aquí el link de tu imagen...",
             ),
-            onChanged: (val) => setState(() {}),
+            onChanged: (val) => setState(() => _previewPhoto = val),
           ),
         ),
       ],
     );
   }
 
-  void _showPhotoTutorial() {
+  // 🔥 RECUPERADO: DIÁLOGO DE INSTRUCCIONES (LO QUE FALTABA)
+  void _showInstructionsDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text("Cómo poner tu foto 📸", style: TextStyle(color: Colors.white)),
+        title: const Text("Cómo obtener un link de imagen 📸", style: TextStyle(color: Colors.white)),
         content: SingleChildScrollView(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                "La URL debe terminar en .jpg o .png",
-                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
-              ),
+              _step("1", "Ve a Google Imágenes, Pinterest o Imgur."),
+              _step("2", "Mantén presionado sobre la imagen que te guste."),
+              _step("3", "Elige la opción 'Abrir imagen en pestaña nueva' o 'Copiar dirección de imagen'."),
               const SizedBox(height: 15),
-              _step("1", "Busca tu imagen en Google o Pinterest."),
-              _step("2", "Mantén presionado sobre la imagen."),
-              _step("3", "Elige 'Abrir imagen en pestaña nueva' o 'Copiar dirección de imagen'."),
-              const SizedBox(height: 10),
               Container(
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(10)),
-                child: const Text(
-                  "❌ MAL: pinterest.com/pin/123\n✅ BIEN: i.pinimg.com/.../foto.jpg",
-                  style: TextStyle(color: Colors.grey, fontSize: 12, fontFamily: 'monospace'),
+                decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white24)),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Ejemplos de Links Válidos:", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                    SizedBox(height: 5),
+                    Text("✅ https://i.imgur.com/foto.jpg", style: TextStyle(color: Colors.greenAccent, fontSize: 11)),
+                    Text("✅ https://i.pinimg.com/.../foto.png", style: TextStyle(color: Colors.greenAccent, fontSize: 11)),
+                    SizedBox(height: 5),
+                    Text("❌ https://pinterest.com/pin/123 (Esto es una web, no una imagen)", style: TextStyle(color: Colors.redAccent, fontSize: 11)),
+                  ],
                 ),
               ),
             ],
@@ -529,7 +644,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _step(String num, String text) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
+      padding: const EdgeInsets.only(bottom: 12.0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -539,9 +654,27 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Text(num, style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)),
           ),
           const SizedBox(width: 10),
-          Expanded(child: Text(text, style: const TextStyle(color: Colors.white70))),
+          Expanded(child: Text(text, style: const TextStyle(color: Colors.grey, fontSize: 13))),
         ],
       ),
+    );
+  }
+}
+
+// Widget auxiliar para sombra simple
+class DropShadow extends StatelessWidget {
+  final Widget child;
+  const DropShadow({super.key, required this.child});
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned(
+          top: 2, left: 2,
+          child: Opacity(opacity: 0.5, child: ColorFiltered(colorFilter: const ColorFilter.mode(Colors.black, BlendMode.srcIn), child: child)),
+        ),
+        child,
+      ],
     );
   }
 }
