@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:local_auth/local_auth.dart'; // Solo una vez
-import 'package:flutter/services.dart'; // Para manejar errores de plataforma
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:flutter/services.dart';
+
+// IMPORTACIONES
 import 'dashboard_page.dart';
 import 'register_page.dart';
+import 'terms_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -17,184 +21,180 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   bool _isLoading = false;
 
-  // Instancia correcta para la versión 3.0.0
   final LocalAuthentication auth = LocalAuthentication();
 
   Future<void> _login() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      _showError("Llena los campos");
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      _goToDashboard();
+      await _checkTermsAndRedirect();
     } on FirebaseAuthException catch (e) {
-      _showError(e.message ?? "Error al entrar");
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      _showError(e.message ?? "Error de autenticación");
+      setState(() => _isLoading = false);
+    } catch (e) {
+      _showError("Error: $e");
+      setState(() => _isLoading = false);
     }
   }
 
+  // ✅ CORRECCIÓN AQUÍ: Eliminamos 'options' que daba error en tu versión
   Future<void> _authenticateBiometric() async {
     try {
-      // 1. Verificamos si hay hardware
       final bool canCheckBiometrics = await auth.canCheckBiometrics;
-      final bool isDeviceSupported = await auth.isDeviceSupported();
-
-      if (!canCheckBiometrics || !isDeviceSupported) {
-        _showError("Tu celular no tiene biometría disponible.");
+      if (!canCheckBiometrics) {
+        _showError("Biometría no disponible");
         return;
       }
 
-      // 2. Autenticamos (Formato Universal)
-      // Al quitar 'stickyAuth' y 'options', Flutter usará la configuración por defecto
-      // que funciona en el 99% de los casos.
+      // Usamos la forma simple compatible con versiones viejas y nuevas
       final bool didAuthenticate = await auth.authenticate(
-        localizedReason: 'Toca el sensor o mira la cámara para entrar',
+        localizedReason: 'Toca el sensor para entrar',
+        // Quitamos 'options' porque tu librería es antigua.
+        // Si necesitas parámetros específicos en versión vieja usa:
+        // stickyAuth: true,
+        // biometricOnly: true,
       );
 
       if (didAuthenticate) {
         final user = FirebaseAuth.instance.currentUser;
         if (user != null) {
-          _goToDashboard();
+          await _checkTermsAndRedirect();
         } else {
-          _showError("Primero inicia sesión con contraseña para vincular.");
+          _showError("Inicia sesión con contraseña primero");
         }
       }
-    } on PlatformException catch (e) {
-      // Ignoramos el error "NotAvailable" que pasa a veces al cancelar
-      if (e.code == 'NotAvailable') return;
-      _showError("Error: ${e.message}");
-    } catch (e) {
-      _showError("No se pudo autenticar.");
+    } on PlatformException catch (_) {
+      _showError("Error biométrico. Usa contraseña.");
     }
   }
 
-  void _goToDashboard() {
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const DashboardPage()),
-            (route) => false,
-      );
+  Future<void> _checkTermsAndRedirect() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final bool accepted = doc.data()?['accepted_terms'] ?? false;
+
+      if (!mounted) return;
+
+      if (accepted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const DashboardPage()),
+              (route) => false,
+        );
+      } else {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const TermsPage(isViewOnly: false)),
+              (route) => false,
+        );
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      _showError("Error verificando cuenta");
     }
   }
 
   void _showError(String msg) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.redAccent),
-      );
-    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.redAccent),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    const neonGreen = Color(0xFF00E676);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF050505), // Fondo negro puro para que resalte el neón
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Center(
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // --- AQUÍ ESTÁ EL CAMBIO: TU LOGO CON BRILLO ---
-                Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF00E676).withOpacity(0.4), // Brillo verde matrix
-                        blurRadius: 30,
-                        spreadRadius: 5,
-                      )
-                    ],
-                  ),
-                  child: Image.asset(
-                    'assets/icon/icon.png', // Tu logo real
-                    height: 120,            // Un buen tamaño
-                    width: 120,
-                  ),
+      backgroundColor: Colors.black,
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // LOGO
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(color: neonGreen.withOpacity(0.4), blurRadius: 30, spreadRadius: 5)
+                  ],
                 ),
+                child: const Icon(Icons.fitness_center, size: 80, color: neonGreen),
+                // Si tienes imagen usa: Image.asset('assets/icon/icon.png', height: 100),
+              ),
+              const SizedBox(height: 30),
 
-                const SizedBox(height: 20),
-                const Text("Bienvenido", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-                const SizedBox(height: 40),
-
-                // Inputs con estilo oscuro
-                TextField(
-                  controller: _emailController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: "Correo",
-                    labelStyle: const TextStyle(color: Colors.grey),
-                    prefixIcon: const Icon(Icons.email, color: Colors.grey),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.grey.shade800),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: const BorderSide(color: Color(0xFF00E676)),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
+              TextField(
+                controller: _emailController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: "Correo",
+                  labelStyle: const TextStyle(color: Colors.grey),
+                  prefixIcon: const Icon(Icons.email, color: neonGreen),
+                  enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: Colors.grey), borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(borderSide: const BorderSide(color: neonGreen), borderRadius: BorderRadius.circular(10)),
                 ),
-                const SizedBox(height: 15),
-                TextField(
-                  controller: _passwordController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: "Contraseña",
-                    labelStyle: const TextStyle(color: Colors.grey),
-                    prefixIcon: const Icon(Icons.lock, color: Colors.grey),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.grey.shade800),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: const BorderSide(color: Color(0xFF00E676)),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  obscureText: true,
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _passwordController,
+                obscureText: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: "Contraseña",
+                  labelStyle: const TextStyle(color: Colors.grey),
+                  prefixIcon: const Icon(Icons.lock, color: neonGreen),
+                  enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: Colors.grey), borderRadius: BorderRadius.circular(10)),
+                  focusedBorder: OutlineInputBorder(borderSide: const BorderSide(color: neonGreen), borderRadius: BorderRadius.circular(10)),
                 ),
-                const SizedBox(height: 25),
+              ),
+              const SizedBox(height: 30),
 
-                _isLoading
-                    ? const CircularProgressIndicator(color: Color(0xFF00E676))
-                    : Column(
+              if (_isLoading)
+                const CircularProgressIndicator(color: neonGreen)
+              else
+                Column(
                   children: [
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: _login,
                         style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          backgroundColor: const Color(0xFF00E676),
+                          backgroundColor: neonGreen,
                           foregroundColor: Colors.black,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          padding: const EdgeInsets.symmetric(vertical: 15),
                         ),
                         child: const Text("ENTRAR", style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ),
-                    const SizedBox(height: 30),
-
-                    // Botón de Huella (Este sí lo dejamos como Icono porque es un botón)
-                    IconButton(
-                      iconSize: 60,
-                      icon: const Icon(Icons.fingerprint, color: Color(0xFF00E676)),
-                      onPressed: _authenticateBiometric,
+                    const SizedBox(height: 20),
+                    GestureDetector(
+                      onTap: _authenticateBiometric,
+                      child: Column(
+                        children: [
+                          Icon(Icons.fingerprint, size: 50, color: neonGreen.withOpacity(0.8)),
+                          const Text("Biometría", style: TextStyle(color: Colors.grey)),
+                        ],
+                      ),
                     ),
-                    const Text("Huella / Cara", style: TextStyle(color: Colors.grey)),
                   ],
                 ),
-                const SizedBox(height: 20),
-                TextButton(
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RegisterPage())),
-                  child: const Text("Crear Cuenta", style: TextStyle(color: Color(0xFF00E676))),
-                ),
-              ],
-            ),
+              const SizedBox(height: 30),
+              TextButton(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RegisterPage())),
+                child: const Text("Crear Cuenta", style: TextStyle(color: neonGreen)),
+              ),
+            ],
           ),
         ),
       ),

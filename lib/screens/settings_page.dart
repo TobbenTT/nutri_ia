@@ -7,6 +7,7 @@ import 'admin_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'login_page.dart';
 import 'edit_profile_page.dart';
+import 'terms_page.dart';
 
 // =======================================================
 // SETTINGS PAGE - CON STREAMBUILDER (DETECTA VIP EN VIVO)
@@ -68,6 +69,8 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+
+
   // Diálogo para editar foto
   void _showEditPhotoDialog(String currentUrl) {
     final controller = TextEditingController(text: currentUrl);
@@ -123,6 +126,156 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
+// 🔒 DIÁLOGO CAMBIAR CONTRASEÑA
+  void _showChangePasswordDialog() {
+    final currentPassController = TextEditingController();
+    final newPassController = TextEditingController();
+    bool isLoading = false;
+    bool obscureCurrent = true;
+    bool obscureNew = true;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E1E1E),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: const Text("Cambiar Contraseña", style: TextStyle(color: Colors.white)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // CAMPO: CONTRASEÑA ACTUAL
+                  TextField(
+                    controller: currentPassController,
+                    obscureText: obscureCurrent,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: "Contraseña Actual",
+                      labelStyle: const TextStyle(color: Colors.grey),
+                      filled: true,
+                      fillColor: Colors.black45,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          obscureCurrent ? Icons.visibility : Icons.visibility_off,
+                          color: Colors.grey,
+                        ),
+                        onPressed: () => setState(() => obscureCurrent = !obscureCurrent),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+
+                  // CAMPO: NUEVA CONTRASEÑA
+                  TextField(
+                    controller: newPassController,
+                    obscureText: obscureNew,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: "Nueva Contraseña",
+                      labelStyle: const TextStyle(color: Colors.grey),
+                      filled: true,
+                      fillColor: Colors.black45,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          obscureNew ? Icons.visibility : Icons.visibility_off,
+                          color: Colors.grey,
+                        ),
+                        onPressed: () => setState(() => obscureNew = !obscureNew),
+                      ),
+                    ),
+                  ),
+                  if (isLoading)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 15),
+                      child: CircularProgressIndicator(color: Color(0xFF00FF88)),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  onPressed: isLoading
+                      ? null
+                      : () async {
+                    final currentPass = currentPassController.text.trim();
+                    final newPass = newPassController.text.trim();
+
+                    if (currentPass.isEmpty || newPass.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Rellena ambos campos")),
+                      );
+                      return;
+                    }
+
+                    if (newPass.length < 6) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("La nueva contraseña debe tener al menos 6 caracteres")),
+                      );
+                      return;
+                    }
+
+                    setState(() => isLoading = true);
+
+                    try {
+                      // 1. Re-autenticar al usuario
+                      final cred = EmailAuthProvider.credential(
+                        email: user!.email!,
+                        password: currentPass,
+                      );
+                      await user!.reauthenticateWithCredential(cred);
+
+                      // 2. Actualizar contraseña
+                      await user!.updatePassword(newPass);
+
+                      if (mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("¡Contraseña actualizada con éxito! 🔒"),
+                            backgroundColor: Color(0xFF00FF88),
+                          ),
+                        );
+                      }
+                    } on FirebaseAuthException catch (e) {
+                      setState(() => isLoading = false);
+                      String errorMsg = "Error al cambiar contraseña";
+                      if (e.code == 'wrong-password') {
+                        errorMsg = "La contraseña actual es incorrecta";
+                      } else if (e.code == 'weak-password') {
+                        errorMsg = "La nueva contraseña es muy débil";
+                      } else if (e.code == 'requires-recent-login') {
+                        errorMsg = "Por seguridad, cierra sesión y vuelve a entrar";
+                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(errorMsg), backgroundColor: Colors.redAccent),
+                      );
+                    } catch (e) {
+                      setState(() => isLoading = false);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.redAccent),
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00FF88)),
+                  child: const Text("Actualizar", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -192,19 +345,21 @@ class _SettingsPageState extends State<SettingsPage> {
                             CircleAvatar(
                               radius: 40,
                               backgroundColor: Colors.grey[800],
-                              backgroundImage: photoUrl.isNotEmpty
+                              // 1. Usamos foregroundImage para intentar cargar la foto encima
+                              foregroundImage: (photoUrl.isNotEmpty)
                                   ? NetworkImage(photoUrl)
                                   : null,
-                              child: photoUrl.isEmpty
-                                  ? Text(
+                              // 2. MAGIA AQUÍ: Si el link es malo (error), ignoramos el error y se muestra el texto de abajo
+                              onForegroundImageError: (_, __) {},
+                              // 3. Este texto se muestra si no hay foto O si la foto falló
+                              child: Text(
                                 displayName.isNotEmpty ? displayName[0].toUpperCase() : "U",
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 32,
                                   fontWeight: FontWeight.bold,
                                 ),
-                              )
-                                  : null,
+                              ),
                             ),
                             Positioned(
                               right: 0,
@@ -298,6 +453,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
                   const SizedBox(height: 30),
 
+                  // 👇👇 AQUÍ PEGAS LA LLAMADA AL SELECTOR 👇👇
+                  _buildThemeSelector(isDonor),
+                  const SizedBox(height: 30),
+
                   // SECCIÓN: HERRAMIENTAS
                   _buildSectionHeader("HERRAMIENTAS"),
                   const SizedBox(height: 10),
@@ -365,41 +524,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
                   const SizedBox(height: 30),
 
-                  // SECCIÓN: CUENTA
-                  _buildSectionHeader("CUENTA"),
-                  const SizedBox(height: 10),
-
-                  _buildMenuTile(
-                    icon: Icons.lock,
-                    title: "Cambiar Contraseña",
-                    subtitle: "Actualiza tu contraseña",
-                    color: Colors.grey,
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Función próximamente...")),
-                      );
-                    },
-                  ),
-
-                  _buildMenuTile(
-                    icon: Icons.privacy_tip,
-                    title: "Privacidad",
-                    subtitle: "Gestiona tus datos",
-                    color: Colors.grey,
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Función próximamente...")),
-                      );
-                    },
-                  ),
-
-                  const SizedBox(height: 30),
-
                   // ---------------------------------------------------------
                   // ZONA ADMIN (SOLO VISIBLE PARA TI)
                   // ---------------------------------------------------------
                   if (user?.email == "david.cabezas.armando@gmail.com") ...[
-                    const SizedBox(height: 30),
                     _buildSectionHeader("ADMINISTRACIÓN"),
                     const SizedBox(height: 10),
                     _buildMenuTile(
@@ -412,33 +540,73 @@ class _SettingsPageState extends State<SettingsPage> {
                         MaterialPageRoute(builder: (_) => const AdminPage()),
                       ),
                     ),
+                    const SizedBox(height: 30),
                   ],
 
-                  const SizedBox(height: 30),
+                  // SECCIÓN: CUENTA (REDISEÑADA)
+                  _buildSectionHeader("CUENTA"),
+                  const SizedBox(height: 10),
 
-                  ListTile(
-                    leading: const Icon(Icons.edit, color: Color(0xFF00FF88)),
-                    title: const Text("Editar Meta y Nombre", style: TextStyle(color: Colors.white)),
-                    subtitle: const Text("Cambia tus calorías diarias", style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    trailing: const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
+                  // 1. EDITAR PERFIL (Ahora integrado)
+                  _buildMenuTile(
+                    icon: Icons.edit_note,
+                    title: "Editar Meta y Nombre",
+                    subtitle: "Cambia tus calorías diarias y nombre",
+                    color: const Color(0xFF00FF88),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const EditProfilePage()),
+                    ),
+                  ),
+
+                  // 2. OTROS AJUSTES DE CUENTA
+                  _buildMenuTile(
+                    icon: Icons.lock,
+                    title: "Cambiar Contraseña",
+                    subtitle: "Actualiza tu contraseña",
+                    color: Colors.grey,
                     onTap: () {
-                      // Navegar a la página nueva sin romper la actual
+                      // BORRA LO QUE HAY AQUÍ (el SnackBar) Y PON ESTO:
+                      _showChangePasswordDialog();
+                    },
+                  ),
+
+                  // 2. PRIVACIDAD (BUSCA ESTO Y CAMBIA EL ONTAP)
+                  _buildMenuTile(
+                    icon: Icons.privacy_tip,
+                    title: "Privacidad",
+                    subtitle: "Gestiona tus datos",
+                    color: Colors.grey,
+                    onTap: () {
+                      // ✅ AHORA NAVEGAMOS A LA PÁGINA REAL
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => const EditProfilePage()),
+                        MaterialPageRoute(builder: (context) => const PrivacyPage()),
                       );
                     },
                   ),
 
+                  // 3. TÉRMINOS Y CONDICIONES
+                  _buildMenuTile(
+                    icon: Icons.gavel,
+                    title: "Términos y Condiciones",
+                    subtitle: "Reglas de uso",
+                    color: Colors.grey,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const TermsPage(isViewOnly: true)), // <--- MODO LECTURA
+                      );
+                    },
+                  ),
 
-                  // BOTÓN CERRAR SESIÓN
+                  const SizedBox(height: 40),
+
+                  // BOTÓN CERRAR SESIÓN (MEJORADO)
                   Container(
                     width: double.infinity,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(15),
-                      border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
-                    ),
-                    child: ElevatedButton.icon(
+                    margin: const EdgeInsets.symmetric(vertical: 10),
+                    child: OutlinedButton.icon(
                       onPressed: () async {
                         final confirm = await showDialog<bool>(
                           context: context,
@@ -465,10 +633,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         );
 
                         if (confirm == true) {
-                          // 1. Desconectar de Firebase
                           await FirebaseAuth.instance.signOut();
-
-                          // 2. IRSE AL LOGIN
                           if (context.mounted) {
                             Navigator.of(context).pushAndRemoveUntil(
                               MaterialPageRoute(builder: (context) => const LoginPage()),
@@ -477,25 +642,25 @@ class _SettingsPageState extends State<SettingsPage> {
                           }
                         }
                       },
-                      icon: const Icon(Icons.logout, color: Colors.redAccent),
+                      icon: const Icon(Icons.logout, color: Colors.redAccent, size: 20),
                       label: const Text(
-                        "Cerrar Sesión",
+                        "CERRAR SESIÓN",
                         style: TextStyle(
                           color: Colors.redAccent,
                           fontWeight: FontWeight.bold,
-                          fontSize: 16,
+                          letterSpacing: 1.1,
                         ),
                       ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent.withOpacity(0.1),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        elevation: 0,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.redAccent, width: 1.2),
+                        padding: const EdgeInsets.symmetric(vertical: 18),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                        backgroundColor: Colors.redAccent.withOpacity(0.05),
                       ),
                     ),
                   ),
 
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 30),
 
                   // Footer
                   Center(
@@ -588,6 +753,93 @@ class _SettingsPageState extends State<SettingsPage> {
           size: 16,
         ),
       ),
+    );
+  }
+
+
+
+  // 🎨 NUEVO: SELECTOR DE SKINS (Pega esto al final de la clase _SettingsPageState)
+  Widget _buildThemeSelector(bool isVip) {
+    // Definimos los colores disponibles
+    final List<Map<String, dynamic>> skins = [
+      {'name': 'Matrix', 'color': 0xFF00FF88, 'vip': false}, // Gratis
+      {'name': 'Gold', 'color': 0xFFFFD700, 'vip': true},   // VIP
+      {'name': 'Pink', 'color': 0xFFFF00FF, 'vip': true},   // VIP
+      {'name': 'Blue', 'color': 0xFF00BFFF, 'vip': true},   // VIP
+      {'name': 'Red', 'color': 0xFFFF3333, 'vip': true},    // VIP
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Título de la sección
+        const Padding(
+          padding: EdgeInsets.only(left: 4.0, bottom: 10),
+          child: Text(
+              "PERSONALIZACIÓN (SKINS)",
+              style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5
+              )
+          ),
+        ),
+
+        // Carrusel horizontal de colores
+        SizedBox(
+          height: 65,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: skins.length,
+            itemBuilder: (context, index) {
+              final skin = skins[index];
+              final Color skinColor = Color(skin['color']);
+
+              // Verificamos si está bloqueado (Es VIP y el usuario NO es VIP)
+              final bool isLocked = skin['vip'] == true && !isVip;
+
+              return GestureDetector(
+                onTap: () {
+                  if (isLocked) {
+                    // Si está bloqueado, mostramos mensaje
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("👑 Skin exclusiva para usuarios VIP"),
+                          backgroundColor: Colors.amber,
+                          duration: Duration(seconds: 2),
+                        )
+                    );
+                  } else {
+                    // Si está desbloqueado, guardamos el color en Firebase
+                    FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(user!.uid)
+                        .update({'theme_color': skin['color']});
+                  }
+                },
+                child: Container(
+                  width: 60,
+                  margin: const EdgeInsets.only(right: 15),
+                  decoration: BoxDecoration(
+                    color: skinColor.withOpacity(0.1), // Fondo transparente
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: skinColor,
+                        width: isLocked ? 1 : 3 // Borde más grueso si está activo
+                    ),
+                  ),
+                  child: Center(
+                    child: isLocked
+                        ? const Icon(Icons.lock, color: Colors.white, size: 20)
+                        : (skin['vip'] ? const Icon(Icons.star, color: Colors.white, size: 14) : null),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -768,7 +1020,7 @@ class _CalorieGoalPageState extends State<CalorieGoalPage> {
 
   Widget _buildDropdown(String label, String value, List<String> items, Function(String?) onChanged) {
     return DropdownButtonFormField<String>(
-      value: value,
+      initialValue: value,
       dropdownColor: const Color(0xFF1E1E1E),
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
@@ -877,7 +1129,7 @@ class _PhysicalProfilePageState extends State<PhysicalProfilePage> {
                   _buildInput("Edad", _ageController, Icons.cake),
                   const SizedBox(height: 15),
                   DropdownButtonFormField<String>(
-                    value: _gender,
+                    initialValue: _gender,
                     dropdownColor: const Color(0xFF1E1E1E),
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
@@ -1077,6 +1329,93 @@ class DonationPage extends StatelessWidget {
       child: Text(
         text,
         style: const TextStyle(color: Colors.white70, fontSize: 13),
+      ),
+    );
+  }
+}
+
+// 🛡️ PÁGINA DE PRIVACIDAD (Pegar al final del archivo)
+class PrivacyPage extends StatefulWidget {
+  const PrivacyPage({super.key});
+  @override
+  State<PrivacyPage> createState() => _PrivacyPageState();
+}
+
+class _PrivacyPageState extends State<PrivacyPage> {
+  final User? user = FirebaseAuth.instance.currentUser;
+  bool _isPrivate = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrivacy();
+  }
+
+  Future<void> _loadPrivacy() async {
+    if (user == null) return;
+    final doc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
+    if (mounted && doc.exists) {
+      setState(() => _isPrivate = doc.data()?['is_private_profile'] ?? false);
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.red.shade900,
+        title: const Text("⚠️ ELIMINAR CUENTA", style: TextStyle(color: Colors.white)),
+        content: const Text("Se borrarán todos tus datos. ¿Seguro?", style: TextStyle(color: Colors.white)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancelar", style: TextStyle(color: Colors.white))),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
+            child: const Text("BORRAR TODO", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && user != null) {
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(user!.uid).delete();
+        await user!.delete();
+        if (mounted) {
+          // Asegúrate de tener importado login_page.dart o usa '/'
+          Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+        }
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Re-inicia sesión para borrar.")));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(title: const Text("Privacidad", style: TextStyle(color: Colors.white)), backgroundColor: Colors.black, iconTheme: const IconThemeData(color: Colors.white)),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          SwitchListTile(
+            activeColor: Theme.of(context).primaryColor,
+            title: const Text("Perfil Privado", style: TextStyle(color: Colors.white)),
+            subtitle: const Text("Ocultar perfil en búsquedas", style: TextStyle(color: Colors.grey)),
+            value: _isPrivate,
+            onChanged: (val) async {
+              setState(() => _isPrivate = val);
+              await FirebaseFirestore.instance.collection('users').doc(user!.uid).update({'is_private_profile': val});
+            },
+          ),
+          const Divider(color: Colors.grey),
+          ListTile(
+            leading: const Icon(Icons.delete_forever, color: Colors.red),
+            title: const Text("Eliminar Cuenta", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            onTap: _deleteAccount,
+          ),
+        ],
       ),
     );
   }

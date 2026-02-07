@@ -1,52 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/services.dart';
-// Asegúrate de que esta ruta sea correcta según tus carpetas:
-import 'services/notification_service.dart';
-import 'screens/login_page.dart'; // O tu página de inicio
-import 'screens/dashboard_page.dart'; // Por si ya está logueado
-import 'package:firebase_auth/firebase_auth.dart' as import_firebase_auth;
+import 'package:cloud_firestore/cloud_firestore.dart'; // NECESARIO PARA LEER EL COLOR
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // NECESARIO PARA GEMINI
+
+// TUS PÁGINAS (Asegúrate que las rutas sean correctas)
+import 'screens/login_page.dart';
+import 'screens/dashboard_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. INICIALIZAR FIREBASE (Vital)
-  // Si usas firebase_options.dart, agrega: options: DefaultFirebaseOptions.currentPlatform
+  // 1. INICIALIZAR FIREBASE
   await Firebase.initializeApp();
 
-  // 2. CHALECO ANTIBALAS PARA NOTIFICACIONES 🛡️
-  // Si esto falla, la app NO se detiene.
-  try {
-    final notiService = NotificationService();
-    await notiService.init();
+  // 2. CARGAR CLAVES DE SEGURIDAD (Evita el crash de Gemini)
+  await dotenv.load(fileName: ".env");
 
-    // Programamos los horarios (seguros dentro del try)
-    await notiService.scheduleDailyNotification(
-        id: 1,
-        title: "¡Buenos días! ☀️",
-        body: "No olvides registrar tu desayuno.",
-        hour: 9
-    );
-    await notiService.scheduleDailyNotification(
-        id: 2,
-        title: "Hora del almuerzo 🥗",
-        body: "¿Qué vas a comer hoy? Regístralo.",
-        hour: 14
-    );
-    await notiService.scheduleDailyNotification(
-        id: 3,
-        title: "Cena ligera 🌙",
-        body: "Cierra tu día registrando tu cena.",
-        hour: 20
-    );
-    debugPrint("✅ Notificaciones iniciadas correctamente");
-
-  } catch (e) {
-    // Si falla, solo imprimimos el error, pero la app SIGUE VIVA
-    debugPrint("⚠️ Error en notificaciones (La app iniciará sin ellas): $e");
-  }
-
-  // 3. BLOQUEAR GIRO DE PANTALLA (Opcional, se ve más pro vertical)
+  // 3. BLOQUEAR GIRO DE PANTALLA
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   runApp(const MyApp());
@@ -57,40 +29,72 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 1. ESCUCHAMOS LA AUTENTICACIÓN (¿Está logueado?)
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, authSnapshot) {
+
+        // Si no hay usuario, mostramos el Login con color verde por defecto
+        if (!authSnapshot.hasData) {
+          return _buildApp(const Color(0xFF00FF88), const LoginPage());
+        }
+
+        // 2. SI HAY USUARIO, ESCUCHAMOS SU COLOR EN FIREBASE (Aquí ocurre la magia)
+        final String uid = authSnapshot.data!.uid;
+
+        return StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+          builder: (context, userSnapshot) {
+            // Color por defecto (Verde Matrix) si no ha elegido nada
+            Color userColor = const Color(0xFF00FF88);
+
+            if (userSnapshot.hasData && userSnapshot.data!.exists) {
+              final data = userSnapshot.data!.data() as Map<String, dynamic>;
+              // Si tiene un color guardado, lo usamos
+              if (data.containsKey('theme_color')) {
+                userColor = Color(data['theme_color']);
+              }
+            }
+
+            // Construimos la app con el color del usuario y lo mandamos al Dashboard
+            return _buildApp(userColor, const DashboardPage());
+          },
+        );
+      },
+    );
+  }
+
+  // Función auxiliar para construir el MaterialApp con un color específico
+  Widget _buildApp(Color primaryColor, Widget home) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Nutri IA',
       theme: ThemeData(
-        brightness: Brightness.dark, // Tema oscuro por defecto
-        primaryColor: const Color(0xFF00FF88),
-        scaffoldBackgroundColor: Colors.black,
-        useMaterial3: true,
+          brightness: Brightness.dark,
+          primaryColor: primaryColor,
+          scaffoldBackgroundColor: Colors.black,
+          useMaterial3: true,
+          // Configuración profunda de colores para que TODO cambie (botones, iconos, etc.)
+          colorScheme: ColorScheme.dark(
+            primary: primaryColor,
+            secondary: primaryColor,
+            surface: const Color(0xFF1E1E1E),
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primaryColor,
+              foregroundColor: Colors.black, // Texto negro en botones de color
+            ),
+          ),
+          iconTheme: IconThemeData(color: primaryColor),
+          inputDecorationTheme: InputDecorationTheme(
+              focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: primaryColor),
+                  borderRadius: BorderRadius.circular(10)
+              )
+          )
       ),
-      // Aquí decides a dónde ir. Si usas FirebaseAuth, puedes validar si hay usuario.
-      home: const AuthWrapper(),
+      home: home,
     );
   }
 }
-
-// Pequeño widget para decidir si ir al Login o al Dashboard
-class AuthWrapper extends StatelessWidget {
-  const AuthWrapper({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    // Escucha cambios en la autenticación en tiempo real
-    return StreamBuilder(
-      stream: import_firebase_auth.FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator(color: Color(0xFF00FF88)));
-        }
-        if (snapshot.hasData) {
-          return const DashboardPage(); // Usuario logueado -> Dashboard
-        }
-        return const LoginPage(); // No logueado -> Login
-      },
-    );
-  }
-}
-

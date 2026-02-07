@@ -7,12 +7,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart'; // Para HapticFeedback
-
+import 'package:fl_chart/fl_chart.dart';
 // IMPORTACIONES DE TUS OTRAS PÁGINAS
 import 'social_page.dart';
-import 'settings_page.dart';
+import 'settings_page.dart'; // Aquí suele estar DonationPage también
 import 'calendar_page.dart';
 import 'api_config.dart';
 
@@ -40,10 +39,9 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
-
-    // ✅ MODELO GEMINI
+    // ✅ CORRECCIÓN 2026: Usamos Gemini 3 Flash (el modelo 1.5 ya no existe)
     _model = GenerativeModel(
-      model: 'gemini-1.5-flash', // O el modelo que estés usando
+      model: 'gemini-3-flash-preview', // <--- ESTE ES EL NOMBRE CORRECTO AHORA
       apiKey: ApiConfig.geminiApiKey,
       generationConfig: GenerationConfig(responseMimeType: 'application/json'),
     );
@@ -67,21 +65,20 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // 📊 CARGAR ESTADÍSTICAS
+  // 1. FUNCIÓN PARA CARGAR DATOS DE LA SEMANA
   Future<void> _loadWeeklyStats() async {
     if (user == null) return;
-    final now = DateTime.now();
-    final sevenDaysAgo = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6));
 
-    Map<int, double> tempStats = {};
-    for (int i = 0; i < 7; i++) tempStats[i] = 0.0;
+    // Inicializamos 7 días en 0 (0=Hace 6 días ... 6=Hoy)
+    Map<int, double> tempStats = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0};
+
+    final now = DateTime.now();
+    final startOfPeriod = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6));
 
     try {
       final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user!.uid)
-          .collection('meals')
-          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
+          .collection('users').doc(user!.uid).collection('meals')
+          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfPeriod))
           .get();
 
       for (var doc in snapshot.docs) {
@@ -91,25 +88,153 @@ class _DashboardPageState extends State<DashboardPage> {
 
         if (ts != null) {
           final date = ts.toDate();
-          final dateKey = DateTime(date.year, date.month, date.day);
-          final todayKey = DateTime(now.year, now.month, now.day);
-          final diff = todayKey.difference(dateKey).inDays;
+          final dateDay = DateTime(date.year, date.month, date.day);
+          final todayDay = DateTime(now.year, now.month, now.day);
+
+          // Calculamos diferencia: 0=Hoy, 1=Ayer, etc.
+          final diff = todayDay.difference(dateDay).inDays;
 
           if (diff >= 0 && diff <= 6) {
+            // Invertimos para el gráfico: 0=Izq (Viejo), 6=Der (Hoy)
             int chartIndex = 6 - diff;
             tempStats[chartIndex] = (tempStats[chartIndex] ?? 0) + cals;
           }
         }
       }
-
-      if (mounted) {
-        setState(() {
-          _chartCache.addAll(tempStats);
-        });
-      }
+      if (mounted) setState(() => _chartCache.addAll(tempStats));
     } catch (e) {
-      debugPrint("Error cargando stats: $e");
+      debugPrint("Error stats: $e");
     }
+  }
+
+  // 2. WIDGET DEL GRÁFICO (VERSIÓN FL_CHART 1.1.1)
+  Widget _buildStatsView() {
+    if (_chartCache.isEmpty) {
+      return const Center(child: CircularProgressIndicator(color: Color(0xFF00FF88)));
+    }
+
+    // Calcular altura máxima del gráfico
+    double maxCal = dailyGoal.toDouble() + 500;
+    for(var val in _chartCache.values) {
+      if(val > maxCal) maxCal = val + 500;
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("Tu Progreso Semanal", style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 5),
+          const Text("Últimos 7 días vs Meta", style: TextStyle(color: Colors.grey)),
+          const SizedBox(height: 30),
+
+          Container(
+            height: 300,
+            padding: const EdgeInsets.fromLTRB(10, 20, 20, 0),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E1E),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white10),
+            ),
+            child: BarChart(
+              BarChartData(
+                alignment: BarChartAlignment.spaceAround,
+                maxY: maxCal,
+                barTouchData: BarTouchData(
+                  touchTooltipData: BarTouchTooltipData(
+                    getTooltipColor: (_) => Colors.black87,
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      return BarTooltipItem(
+                        '${rod.toY.toInt()} kcal',
+                        const TextStyle(color: Color(0xFF00FF88), fontWeight: FontWeight.bold),
+                      );
+                    },
+                  ),
+                ),
+                titlesData: FlTitlesData(
+                  show: true,
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      getTitlesWidget: (value, meta) {
+                        final index = value.toInt();
+                        final date = DateTime.now().subtract(Duration(days: 6 - index));
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text(
+                            index == 6 ? 'HOY' : "${date.day}/${date.month}",
+                            style: TextStyle(
+                                color: index == 6 ? const Color(0xFF00FF88) : Colors.grey,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold
+                            ),
+                          ),
+                        );
+                      },
+                      reservedSize: 30,
+                    ),
+                  ),
+                  leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                ),
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10, strokeWidth: 1),
+                ),
+                borderData: FlBorderData(show: false),
+                barGroups: _chartCache.entries.map((e) {
+                  final index = e.key;
+                  final cals = e.value;
+                  final isOverLimit = cals > dailyGoal;
+
+                  return BarChartGroupData(
+                    x: index,
+                    barRods: [
+                      BarChartRodData(
+                        toY: cals,
+                        color: isOverLimit ? Colors.redAccent : const Color(0xFF00FF88),
+                        width: 16,
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+                        backDrawRodData: BackgroundBarChartRodData(
+                          show: true,
+                          toY: dailyGoal.toDouble(),
+                          color: const Color(0xFF2A2A2A),
+                        ),
+                      ),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _legendItem(const Color(0xFF00FF88), "Bien"),
+              const SizedBox(width: 20),
+              _legendItem(Colors.redAccent, "Exceso"),
+              const SizedBox(width: 20),
+              _legendItem(const Color(0xFF2A2A2A), "Meta: $dailyGoal"),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _legendItem(Color color, String text) {
+    return Row(
+      children: [
+        Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(text, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+      ],
+    );
   }
 
   // ==========================================
@@ -220,14 +345,14 @@ class _DashboardPageState extends State<DashboardPage> {
           builder: (context, setState) {
             return AlertDialog(
               backgroundColor: const Color(0xFF1E1E1E),
-              title: const Text("Agregar con IA", style: TextStyle(color: Colors.white)),
+              title: const Text("Agregar Manual", style: TextStyle(color: Colors.white)),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextField(
                     controller: nameController,
                     style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(hintText: "Ej: Pollo con arroz", hintStyle: TextStyle(color: Colors.grey)),
+                    decoration: const InputDecoration(hintText: "Ej: Manzana", hintStyle: TextStyle(color: Colors.grey)),
                   ),
                   if (isLoading) const Padding(padding: EdgeInsets.only(top: 20), child: CircularProgressIndicator(color: Color(0xFF00FF88))),
                 ],
@@ -242,23 +367,15 @@ class _DashboardPageState extends State<DashboardPage> {
 
                     setState(() => isLoading = true);
                     try {
-                      // Simulación de llamada HTTP o uso de SDK
-                      // Aquí deberías poner tu lógica de _model.generateContent o http.post
-                      // Para el ejemplo, usaremos un mock rápido o tu lógica anterior
-
-                      // ... TU CÓDIGO DE LLAMADA A GEMINI AQUÍ ...
-
-                      // Simulamos respuesta para que funcione el botón
-                      await Future.delayed(const Duration(seconds: 1));
-                      await _saveMeal(nameController.text, 300, protein: 20, carbs: 30, fat: 10);
-
+                      // Guardado manual simple
+                      await _saveMeal(nameController.text, 100); // 100 kcal por defecto si es manual simple
                       if (mounted) Navigator.pop(context);
                     } catch (e) {
                       // Manejo error
                     }
                   },
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00FF88)),
-                  child: const Text("Calcular", style: TextStyle(color: Colors.black)),
+                  child: const Text("Guardar", style: TextStyle(color: Colors.black)),
                 ),
               ],
             );
@@ -267,6 +384,128 @@ class _DashboardPageState extends State<DashboardPage> {
       },
     );
   }
+
+  // ==========================================
+  // FUNCIONES SMART (VIP - CENA INTELIGENTE)
+  // ==========================================
+
+  // 🧠 FUNCIÓN SMART: SUGERENCIA DE CENA (SOLO VIP)
+  Future<void> _getDinnerSuggestion(int currentCalories) async {
+    // 1. Verificar si es VIP
+    if (user == null) return;
+
+    // Mostrar carga
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: Color(0xFFFFD700))),
+    );
+
+    try {
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
+      final bool isVip = userDoc.data()?['is_donor'] ?? false;
+
+      // ⛔ BLOQUEO PARA GRATUITOS
+      if (!isVip) {
+        if (mounted) Navigator.pop(context); // Cerrar carga
+        _showVipLockDialog(); // Mostrar alerta de venta
+        return;
+      }
+
+      // 2. Calcular lo que falta
+      int remaining = dailyGoal - currentCalories;
+      if (remaining < 0) remaining = 0;
+
+      // 3. Consultar a Gemini (Texto simple, no consume visión)
+      final prompt = "Actúa como un chef nutricionista experto. A mi usuario le quedan exactamente $remaining calorías para llegar a su meta de hoy ($dailyGoal kcal en total). "
+          "Sugiere UNA opción de cena detallada que se ajuste a esas calorías restantes. "
+          "Formato: Nombre del plato, ingredientes clave y por qué es bueno. Sé breve y motivador. Usa emojis.";
+
+      // Usamos Content.text porque es una consulta de texto
+      final content = [Content.text(prompt)];
+
+      // Nota: Asegúrate de que tu modelo soporte generateContent sin JSON si el prompt pide texto libre,
+      // o ajusta el prompt para pedir JSON si tu configuración global lo fuerza.
+      // Aquí asumimos que el modelo responderá texto libre o JSON según se le pida.
+      // Si tu modelo está forzado a JSON en initState, Gemini intentará dar JSON.
+      // Ajuste rápido: Pedimos JSON para no romper la config del initState
+
+      final promptJson = "$prompt Responde en JSON: {\"suggestion\": \"texto de la sugerencia\"}";
+      final contentJson = [Content.text(promptJson)];
+
+      final response = await _model.generateContent(contentJson);
+
+      if (mounted) {
+        Navigator.pop(context); // Cerrar carga
+
+        // Decodificamos el JSON
+        String cleanText = response.text ?? "{}";
+        cleanText = cleanText.replaceAll("```json", "").replaceAll("```", "").trim();
+        final data = jsonDecode(cleanText);
+
+        _showSuggestionResult(data['suggestion'] ?? "No pude generar una sugerencia.");
+      }
+
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      }
+    }
+  }
+
+  // UI: Diálogo de Resultado
+  void _showSuggestionResult(String text) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Color(0xFFFFD700))),
+        title: const Row(
+          children: [
+            Icon(Icons.restaurant_menu, color: Color(0xFFFFD700)),
+            SizedBox(width: 10),
+            Text("El Chef Sugiere...", style: TextStyle(color: Colors.white, fontSize: 18)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Text(text, style: const TextStyle(color: Colors.white70, height: 1.5)),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Gracias Chef", style: TextStyle(color: Color(0xFF00FF88)))),
+        ],
+      ),
+    );
+  }
+
+  // UI: Diálogo de "Compra el VIP"
+  void _showVipLockDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text("Función VIP 👑", style: TextStyle(color: Color(0xFFFFD700))),
+        content: const Text(
+          "Solo los donadores tienen acceso al Chef Personal Inteligente.\n\n"
+              "Esta función analiza tus calorías restantes y te dice exactamente qué cenar.",
+          style: TextStyle(color: Colors.grey),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Entendido", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // Redirigir a donación
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const DonationPage()));
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700)),
+            child: const Text("Hacerme VIP", style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   // ==========================================
   // GESTIÓN DE COMIDAS (GUARDAR, BORRAR, EDITAR, COMPARTIR)
@@ -300,34 +539,38 @@ class _DashboardPageState extends State<DashboardPage> {
     await _loadWeeklyStats();
   }
 
-  // 🌍 COMPARTIR COMIDA (AHORA CON ETIQUETA VIP)
-  Future<void> _shareMeal(Map<String, dynamic> data) async {
+
+// 🌍 COMPARTIR COMIDA (ACTUALIZADO CON PRIVACIDAD)
+  Future<void> _shareMeal(Map<String, dynamic> data, bool isPrivate) async {
     if (user == null) return;
 
-    // Leemos datos del usuario para saber si es VIP
     final userDoc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
     final userData = userDoc.data();
     final userName = userData?['name'] ?? user!.displayName ?? "NutriUsuario";
-    final bool isVip = userData?['is_donor'] ?? false; // <--- AQUÍ CAPTURAMOS SI ES VIP
+    final bool isVip = userData?['is_donor'] ?? false;
 
     try {
       await FirebaseFirestore.instance.collection('community_feed').add({
         'user_id': user!.uid,
         'user_name': userName,
-        'is_vip': isVip, // <--- GUARDAMOS EL ESTADO VIP
+        'is_vip': isVip,
         'name': data['name'],
         'calories': data['calories'],
         'protein': data['protein'],
         'carbs': data['carbs'],
         'fat': data['fat'],
         'likes': [],
+        'is_private': isPrivate, // <--- GUARDAMOS SI ES PRIVADO
         'timestamp': FieldValue.serverTimestamp(),
       });
 
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("¡Publicado! 🌍"), backgroundColor: Colors.lightBlueAccent),
+          SnackBar(
+              content: Text(isPrivate ? "Publicado solo para amigos 🔒" : "Publicado en el muro global 🌍"),
+              backgroundColor: Theme.of(context).primaryColor // Usar color del tema
+          ),
         );
       }
     } catch (e) {
@@ -335,7 +578,7 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // ✏️ FUNCIÓN DE EDICIÓN (CON BOTÓN COMPARTIR)
+  // ✏️ FUNCIÓN DE EDICIÓN (CON BOTÓN COMPARTIR CORREGIDO)
   void _showEditMealDialog(String mealId, Map<String, dynamic> currentData) {
     final nameCtrl = TextEditingController(text: currentData['name']);
     final calCtrl = TextEditingController(text: currentData['calories'].toString());
@@ -373,7 +616,7 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
         ),
         actions: [
-          // 👇👇👇 BOTÓN DE COMPARTIR AQUÍ 👇👇👇
+          // 👇👇👇 AQUÍ ESTABA EL ERROR (CORREGIDO) 👇👇👇
           IconButton(
             icon: const Icon(Icons.share, color: Colors.lightBlueAccent),
             tooltip: "Publicar en Comunidad",
@@ -383,7 +626,7 @@ class _DashboardPageState extends State<DashboardPage> {
               'protein': int.tryParse(protCtrl.text) ?? 0,
               'carbs': int.tryParse(carbCtrl.text) ?? 0,
               'fat': int.tryParse(fatCtrl.text) ?? 0,
-            }),
+            }, false), // <--- AGREGADO 'false' (Público) PARA CUMPLIR CON LOS 2 ARGUMENTOS
           ),
           // 👆👆👆
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.grey))),
@@ -398,10 +641,10 @@ class _DashboardPageState extends State<DashboardPage> {
               });
               if (mounted) {
                 Navigator.pop(context);
-                _loadWeeklyStats();
+                _loadWeeklyStats(); // Asegúrate de que esta función exista en tu código
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00FF88)),
+            style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor),
             child: const Text("Guardar", style: TextStyle(color: Colors.black)),
           ),
         ],
@@ -507,6 +750,30 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               const SizedBox(height: 30),
               _buildMacroRow(totalProtein, totalCarbs, totalFat),
+
+              // ⬇️⬇️⬇️ BOTÓN MÁGICO DE SUGERENCIA AQUÍ ⬇️⬇️⬇️
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.symmetric(horizontal: 5),
+                child: ElevatedButton.icon(
+                  onPressed: () => _getDinnerSuggestion(totalCal), // Pasamos las calorías actuales
+                  icon: const Icon(Icons.auto_awesome, color: Colors.black),
+                  label: const Text(
+                    "¿Qué puedo comer ahora?",
+                    style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFD700), // Dorado VIP
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    elevation: 5,
+                    shadowColor: Colors.amber.withOpacity(0.5),
+                  ),
+                ),
+              ),
+              // ⬆️⬆️⬆️ FIN DEL BOTÓN ⬆️⬆️⬆️
+
               const SizedBox(height: 30),
               _buildMealsSection(meals),
               const SizedBox(height: 30),
@@ -634,67 +901,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildStatsView() {
-    final now = DateTime.now();
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text("Estadísticas", style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 30),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: const Color(0xFF1F1F1F), borderRadius: BorderRadius.circular(20)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("Última Semana", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 20),
-                SizedBox(
-                  height: 300,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: List.generate(7, (i) {
-                      final date = now.subtract(Duration(days: 6 - i));
-                      final dayLabel = DateFormat('E').format(date);
-                      final isToday = date.day == now.day;
-                      final height = _chartCache[i] ?? 0.0;
-                      return Column(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Text("${height.toInt()}", style: const TextStyle(color: Colors.grey, fontSize: 10)),
-                          const SizedBox(height: 8),
-                          Container(
-                            width: 12,
-                            height: (isToday ? 150.0 : height).clamp(10.0, 200.0).toDouble(),
-                            decoration: BoxDecoration(color: isToday ? const Color(0xFF00FF88) : const Color(0xFF333333), borderRadius: BorderRadius.circular(5)),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(dayLabel[0], style: TextStyle(color: isToday ? const Color(0xFF00FF88) : Colors.grey, fontWeight: FontWeight.bold)),
-                        ],
-                      );
-                    }),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              _buildStatCard("Promedio", "1850", Icons.functions, const Color(0xFF00FF88)),
-              const SizedBox(width: 15),
-              _buildStatCard("Mejor Día", "Viernes", Icons.emoji_events, const Color(0xFFFFD700)),
-            ],
-          ),
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {
     return Expanded(
       child: Container(
@@ -724,7 +930,7 @@ class _DashboardPageState extends State<DashboardPage> {
             _buildHomeView(),
             _buildStatsView(),
             const SocialPage(),
-            const SettingsPage(), // Usa tu página existente
+            const SettingsPage(),
           ],
         ),
       ),

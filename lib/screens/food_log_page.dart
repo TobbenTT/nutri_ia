@@ -20,9 +20,9 @@ class FoodLogPage extends StatelessWidget {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddFoodDialog(context), // Llamamos a la función
+        onPressed: () => _showAddFoodDialog(context),
+        tooltip: 'Añadir alimento', // Llamamos a la función
         child: const Icon(Icons.add),
-        tooltip: 'Añadir alimento',
       ),
     );
   }

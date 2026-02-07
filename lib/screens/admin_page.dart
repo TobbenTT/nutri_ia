@@ -72,7 +72,7 @@ class _AdminPageState extends State<AdminPage> {
                         side: isDonor ? const BorderSide(color: Colors.amber, width: 1) : BorderSide.none,
                       ),
                       child: SwitchListTile(
-                        activeColor: Colors.amber,
+                        activeThumbColor: Colors.amber,
                         title: Text(
                             data['name'] ?? "Sin Nombre",
                             style: TextStyle(

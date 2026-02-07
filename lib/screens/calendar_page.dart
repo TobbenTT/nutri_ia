@@ -4,6 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
+// Asegúrate de que esta importación sea correcta según tus archivos
+import 'settings_page.dart'; // Para redirigir a DonationPage
+
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
 
@@ -14,25 +17,69 @@ class CalendarPage extends StatefulWidget {
 class _CalendarPageState extends State<CalendarPage> {
   final User? user = FirebaseAuth.instance.currentUser;
 
+  // Configuración del Calendario
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
 
-  // Cache para las comidas del día seleccionado
+  // Datos
   List<DocumentSnapshot> _selectedMeals = [];
   bool _isLoading = false;
   int _totalCalories = 0;
+
+  // VIP Status
+  bool _isVip = false;
 
   @override
   void initState() {
     super.initState();
     _selectedDay = _focusedDay;
-    _loadMealsForDay(_focusedDay);
+    _checkVipStatus();
   }
 
-  // 📥 CARGAR COMIDAS DE UN DÍA ESPECÍFICO
+  // 1. VERIFICAR VIP AL INICIO
+  Future<void> _checkVipStatus() async {
+    if (user == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user!.uid).get();
+      if (mounted) {
+        setState(() {
+          _isVip = doc.data()?['is_donor'] ?? false;
+        });
+        // Una vez verificado el VIP, cargamos los datos de hoy
+        _loadMealsForDay(_focusedDay);
+      }
+    } catch (e) {
+      debugPrint("Error verificando VIP: $e");
+      // Si falla, asumimos false por seguridad y cargamos igual
+      if (mounted) _loadMealsForDay(_focusedDay);
+    }
+  }
+
+  // 2. CARGAR COMIDAS CON LÓGICA DE BLOQUEO
   Future<void> _loadMealsForDay(DateTime date) async {
     if (user == null) return;
 
+    // A. LÓGICA DE BLOQUEO (Solo para NO VIPs)
+    if (!_isVip) {
+      final now = DateTime.now();
+      // Normalizamos las fechas para ignorar horas/minutos
+      final today = DateTime(now.year, now.month, now.day);
+      final checkDate = DateTime(date.year, date.month, date.day);
+
+      final difference = today.difference(checkDate).inDays;
+
+      // Si es historial antiguo (> 7 días), bloqueamos
+      if (difference.abs() > 7) {
+        setState(() {
+          _selectedMeals = [];
+          _totalCalories = 0;
+        });
+        _showHistoryLockDialog();
+        return;
+      }
+    }
+
+    // B. CARGA DE DATOS
     setState(() {
       _isLoading = true;
       _selectedMeals = [];
@@ -40,7 +87,7 @@ class _CalendarPageState extends State<CalendarPage> {
     });
 
     try {
-      // Convertimos la fecha seleccionada al formato exacto que guardamos en Firebase "yyyy-MM-dd"
+      // Usamos el mismo formato que en DashboardPage: yyyy-MM-dd
       final String dateStr = DateFormat('yyyy-MM-dd').format(date);
 
       final query = await FirebaseFirestore.instance
@@ -55,29 +102,90 @@ class _CalendarPageState extends State<CalendarPage> {
         tempCals += (doc.data()['calories'] as num? ?? 0).toInt();
       }
 
-      setState(() {
-        _selectedMeals = query.docs;
-        _totalCalories = tempCals;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _selectedMeals = query.docs;
+          _totalCalories = tempCals;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       debugPrint("Error cargando historial: $e");
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  // 3. ALERTA DE BLOQUEO VIP
+  void _showHistoryLockDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Row(
+          children: [
+            Icon(Icons.lock_clock, color: Color(0xFFFFD700)),
+            SizedBox(width: 10),
+            Text("Historial Antiguo", style: TextStyle(color: Colors.white, fontSize: 18)),
+          ],
+        ),
+        content: const Text(
+          "El plan gratuito solo permite ver los últimos 7 días.\n\n"
+              "Para analizar tu progreso a largo plazo, hazte VIP.",
+          style: TextStyle(color: Colors.grey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cerrar", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // Asumiendo que DonationPage está en settings_page.dart o impórtala si está aparte
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const DonationPage()));
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700)),
+            child: const Text("Desbloquear", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    // Capturamos color del tema global
+    final themeColor = Theme.of(context).primaryColor;
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         title: const Text("Historial", style: TextStyle(color: Colors.white)),
         backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: IconThemeData(color: themeColor),
+        actions: [
+          if (_isVip)
+            Container(
+              margin: const EdgeInsets.only(right: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                  color: const Color(0xFFFFD700).withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFFFD700))
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.star, color: Color(0xFFFFD700), size: 12),
+                  SizedBox(width: 5),
+                  Text("VIP", style: TextStyle(color: Color(0xFFFFD700), fontSize: 12, fontWeight: FontWeight.bold))
+                ],
+              ),
+            )
+        ],
       ),
       body: Column(
         children: [
-          // 1. EL CALENDARIO
+          // CALENDARIO VISUAL
           Container(
             margin: const EdgeInsets.all(15),
             decoration: BoxDecoration(
@@ -88,30 +196,31 @@ class _CalendarPageState extends State<CalendarPage> {
               firstDay: DateTime.utc(2024, 1, 1),
               lastDay: DateTime.utc(2030, 12, 31),
               focusedDay: _focusedDay,
+              // locale: 'es_ES', // DESCOMENTAR SOLO SI TIENES INTL CONFIGURADO EN MAIN
 
-              // Estilos visuales
-              calendarStyle: const CalendarStyle(
-                defaultTextStyle: TextStyle(color: Colors.white),
-                weekendTextStyle: TextStyle(color: Colors.grey),
-                todayDecoration: BoxDecoration(
+              // Estilos
+              calendarStyle: CalendarStyle(
+                defaultTextStyle: const TextStyle(color: Colors.white),
+                weekendTextStyle: const TextStyle(color: Colors.grey),
+                todayDecoration: const BoxDecoration(
                   color: Color(0xFF333333),
                   shape: BoxShape.circle,
                 ),
                 selectedDecoration: BoxDecoration(
-                  color: Color(0xFF00FF88),
+                  color: themeColor,
                   shape: BoxShape.circle,
                 ),
-                selectedTextStyle: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                selectedTextStyle: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
               ),
               headerStyle: const HeaderStyle(
                 formatButtonVisible: false,
                 titleCentered: true,
-                titleTextStyle: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                titleTextStyle: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                 leftChevronIcon: Icon(Icons.chevron_left, color: Colors.white),
                 rightChevronIcon: Icon(Icons.chevron_right, color: Colors.white),
               ),
 
-              // Lógica de selección
+              // Lógica de Selección
               selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
               onDaySelected: (selectedDay, focusedDay) {
                 if (!isSameDay(_selectedDay, selectedDay)) {
@@ -119,7 +228,7 @@ class _CalendarPageState extends State<CalendarPage> {
                     _selectedDay = selectedDay;
                     _focusedDay = focusedDay;
                   });
-                  _loadMealsForDay(selectedDay); // Cargar datos al tocar
+                  _loadMealsForDay(selectedDay);
                 }
               },
             ),
@@ -127,39 +236,52 @@ class _CalendarPageState extends State<CalendarPage> {
 
           const SizedBox(height: 10),
 
-          // 2. RESUMEN DEL DÍA
-          if (_selectedMeals.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    DateFormat('EEEE, d MMMM', 'es_ES').format(_selectedDay!), // Requiere inicializar locale si falla, usa solo 'd MMMM'
-                    style: const TextStyle(color: Colors.grey, fontSize: 16),
-                  ),
-                  Text(
-                    "Total: $_totalCalories kcal",
-                    style: const TextStyle(color: Color(0xFF00FF88), fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                ],
-              ),
+          // RESUMEN TEXTO
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _selectedDay != null ? DateFormat('yyyy-MM-dd').format(_selectedDay!) : "Hoy",
+                  style: const TextStyle(color: Colors.grey, fontSize: 16),
+                ),
+                Text(
+                  "Total: $_totalCalories kcal",
+                  style: TextStyle(color: themeColor, fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+              ],
             ),
+          ),
 
           const SizedBox(height: 10),
 
-          // 3. LISTA DE COMIDAS
+          // LISTA DE RESULTADOS
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: Color(0xFF00FF88)))
+                ? Center(child: CircularProgressIndicator(color: themeColor))
                 : _selectedMeals.isEmpty
-                ? Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.calendar_today, size: 50, color: Colors.grey.shade800),
-                const SizedBox(height: 10),
-                const Text("No hay registros este día", style: TextStyle(color: Colors.grey)),
-              ],
+                ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    // Icono diferente si está bloqueado o vacío
+                      (!_isVip && _selectedDay != null && _selectedDay!.difference(DateTime.now()).inDays.abs() > 7)
+                          ? Icons.lock
+                          : Icons.no_meals,
+                      size: 50,
+                      color: Colors.grey.shade800
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                      (!_isVip && _selectedDay != null && _selectedDay!.difference(DateTime.now()).inDays.abs() > 7)
+                          ? "Historial Bloqueado"
+                          : "Sin registros",
+                      style: const TextStyle(color: Colors.grey)
+                  ),
+                ],
+              ),
             )
                 : ListView.builder(
               padding: const EdgeInsets.all(15),
@@ -176,13 +298,10 @@ class _CalendarPageState extends State<CalendarPage> {
                   ),
                   child: Row(
                     children: [
-                      // Icono según calorías
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                            color: (data['calories'] ?? 0) > 500
-                                ? Colors.orange.withOpacity(0.2)
-                                : Colors.green.withOpacity(0.2),
+                            color: (data['calories'] ?? 0) > 500 ? Colors.orange.withOpacity(0.2) : Colors.green.withOpacity(0.2),
                             shape: BoxShape.circle
                         ),
                         child: Icon(
@@ -196,21 +315,12 @@ class _CalendarPageState extends State<CalendarPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              data['name'] ?? "Comida",
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                            ),
-                            Text(
-                              "P: ${data['protein']}g  C: ${data['carbs']}g  G: ${data['fat']}g",
-                              style: const TextStyle(color: Colors.grey, fontSize: 12),
-                            ),
+                            Text(data['name'] ?? "Comida", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            Text("P: ${data['protein']} C: ${data['carbs']} G: ${data['fat']}", style: const TextStyle(color: Colors.grey, fontSize: 12)),
                           ],
                         ),
                       ),
-                      Text(
-                        "${data['calories']} kcal",
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
+                      Text("${data['calories']} kcal", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                     ],
                   ),
                 );
