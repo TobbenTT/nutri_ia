@@ -6,14 +6,14 @@ plugins {
 }
 
 android {
-    namespace = "com.tobben.nutri_ia"
+    namespace = "com.tobben.nutriia"
 
     // ✅ CORRECCIÓN 1: Forzar SDK 36 (Soluciona el error rojo de Build Failed)
     compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
-        applicationId = "com.tobben.nutri_ia"
+        applicationId = "com.tobben.nutriia"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
